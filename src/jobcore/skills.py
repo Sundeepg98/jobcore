@@ -7,6 +7,35 @@ job-matching logic worth sharing rather than re-deriving per platform.
 The table below is the extraction source of truth. It was lifted verbatim from
 ``naukri_server/domain/skill_taxonomy.py`` at commit 0021d82 (2026-08-20);
 that module is now a re-export shim over this one.
+
+Two kinds of variant, handled in two different places
+-----------------------------------------------------
+A board writes one skill many ways. Some of those ways are **semantic** —
+``"aws"`` for Amazon Web Services, ``"k8s"`` for Kubernetes — and nothing but a
+lookup table can know them, so they live in ``SKILL_ALIASES`` below.
+
+The rest are **mechanical**: the same letters with different spacing,
+punctuation or number. ``"postgre sql"``, ``"restapi"``, ``"Rest APIs;"``,
+``"next js"``. Enumerating those one string at a time is a losing game — a real
+235-requisition corpus produced a fresh batch of them — so ``normalize()``
+derives them instead (see ``_derived_key``).
+
+Deriving costs something, and the cost is **false merges**. Stripping every
+non-alphanumeric character would turn both ``"c#"`` and ``"c++"`` into ``"c"``
+and quietly declare two different languages the same skill. So the derivation
+is narrow on purpose:
+
+* only a fixed set of separator characters is removed, and ``+`` and ``#`` are
+  never among them;
+* a derived key that two canonical skills would both claim is **refused**, not
+  guessed — it resolves to neither;
+* exact lookup always wins, so nothing that resolved before can change;
+* the plural/singular step applies only to words long enough for a trailing
+  ``s`` to be an inflection rather than a coincidence (``"sas"`` is not the
+  singular of ``"sass"``).
+
+Every derived case is pinned in ``tests/test_normalisation.py`` alongside the
+false merges it must not make.
 """
 
 from __future__ import annotations
@@ -117,14 +146,66 @@ SKILL_ALIASES: dict[str, set[str]] = {
 }
 
 
+# Misspellings seen in live job posts. A typo cannot be derived — no rule turns
+# "kubernates" into "kubernetes" without also turning real words into each
+# other — so these are data, and each one earns its place by having been
+# observed on a real requisition rather than imagined.
+#
+# Receipts: all five appear in the 235 native Uplers requisitions captured
+# 2026-08-20 ("kubernates" 1, "kubernets" 1, "typescrpit" 1, "googel cloud" 1,
+# "contenarization" 1).
+CORPUS_MISSPELLINGS: dict[str, set[str]] = {
+    "kubernetes": {"kubernates", "kubernets"},
+    "typescript": {"typescrpit"},
+    "google cloud platform": {"googel cloud"},
+    "docker": {"contenarization"},
+}
+
+
+def _merge_misspellings() -> None:
+    """Fold ``CORPUS_MISSPELLINGS`` into the public table, additively."""
+    for canonical, variants in CORPUS_MISSPELLINGS.items():
+        SKILL_ALIASES[canonical] = SKILL_ALIASES.get(canonical, set()) | variants
+
+
+_merge_misspellings()
+
+
+# ── Mechanical variant derivation ────────────────────────────────────────────
+
+# Characters dropped before the fallback ("derived") lookup. Spelled out rather
+# than expressed as "everything that is not alphanumeric", because that rule
+# collapses BOTH "c#" and "c++" onto "c". "+" and "#" are load-bearing.
+_SEPARATORS = " \t\r\n.-_/\\;:,'`"
+_SEPARATOR_TABLE = {ord(ch): None for ch in _SEPARATORS}
+
+# A trailing "s" is an inflection on a long word and a coincidence on a short
+# one. "microservice"/"microservices" is one skill; "sas"/"sass" is SAS the
+# analytics language and Sass the stylesheet syntax, and "cvs"/"cv" is a version
+# control system and computer vision. Six characters is where the corpus stops
+# producing accidents.
+INFLECTION_MIN_LENGTH = 6
+
+
+def _derived_key(surface: str) -> str:
+    """The separator-free form of a skill string, used only as a fallback."""
+    return surface.translate(_SEPARATOR_TABLE)
+
+
 class SkillTaxonomy:
     """Domain object for skill normalization.
 
-    88 canonical skills, 150 aliases, case-insensitive normalization.
+    88 canonical skills, 155 aliases, case-insensitive normalization, plus
+    derived handling of mechanical variants (spacing, separators, plural).
 
     An unknown skill is NOT dropped — it is returned lowercased and stripped.
     Losing a skill silently would make a job look like a better match than it
     is, so the taxonomy is additive-only by design.
+
+    Lookup happens in three passes, and the order is the safety property:
+    an **exact** table hit always wins, so no string that resolved before this
+    class learned to derive anything can resolve differently now. Derivation
+    only ever converts a previously-unresolved string into a canonical one.
     """
 
     def __init__(self, aliases: dict[str, set[str]]):
@@ -135,9 +216,47 @@ class SkillTaxonomy:
             for alias in alias_set:
                 self._lookup[alias] = canonical
 
+        # Derived index. A key two different canonicals would both claim is
+        # REFUSED rather than awarded to whichever was inserted last — a
+        # coin-flip merge of two real skills is worse than no merge at all.
+        self._derived: dict[str, str] = {}
+        ambiguous: set[str] = set()
+        for surface, canonical in self._lookup.items():
+            key = _derived_key(surface)
+            if not key:
+                continue
+            claimed = self._derived.get(key)
+            if claimed is None:
+                self._derived[key] = canonical
+            elif claimed != canonical:
+                ambiguous.add(key)
+        for key in ambiguous:
+            del self._derived[key]
+        self._ambiguous = frozenset(ambiguous)
+
     def normalize(self, skill: str) -> str:
-        """Normalize a skill string to its canonical form."""
-        return self._lookup.get(skill.lower().strip(), skill.lower().strip())
+        """Normalize a skill string to its canonical form.
+
+        Unknown input is returned lowercased and stripped, never dropped.
+        """
+        raw = skill.lower().strip()
+
+        canonical = self._lookup.get(raw)
+        if canonical is not None:
+            return canonical
+
+        key = _derived_key(raw)
+        if key:
+            canonical = self._derived.get(key)
+            if canonical is not None:
+                return canonical
+            if len(key) >= INFLECTION_MIN_LENGTH:
+                inflected = key[:-1] if key.endswith("s") else key + "s"
+                canonical = self._derived.get(inflected)
+                if canonical is not None:
+                    return canonical
+
+        return raw
 
     def parse_set(self, raw) -> frozenset[str]:
         """Parse skills from any format (set/str/list/tuple) to normalized frozenset."""
@@ -175,7 +294,17 @@ class SkillTaxonomy:
 
     @property
     def alias_count(self) -> int:
+        """Explicit aliases only. Derived forms are computed, never stored as
+        vocabulary — counting them would inflate the number that documents how
+        much this table actually knows."""
         return sum(len(v) for v in self._aliases.values())
+
+    @property
+    def ambiguous_derived_keys(self) -> frozenset[str]:
+        """Derived forms two canonicals would both claim, and which therefore
+        resolve to neither. Empty on the shipped table; non-empty is a signal
+        that a newly added skill collides with an existing one."""
+        return self._ambiguous
 
 
 # Module-level singleton

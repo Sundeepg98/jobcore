@@ -10,6 +10,14 @@ rather than approximately.
 Regenerating this file is NOT a way to make a failure go away. It is only
 valid when the scoring rules are deliberately changed, in which case naukri
 and jobcore must be re-measured together.
+
+2026-08-20: the taxonomy learned to DERIVE mechanical spelling variants
+("restapi", "postgre sql") and gained five explicit misspelling aliases. Every
+one of the 179 captured scoring inputs still produces its captured output
+byte-for-byte — derivation only ever resolves a string that previously
+resolved to nothing — so the corpus was NOT regenerated. Only the taxonomy
+assertions changed, from equality to containment-plus-declaration; see
+``TestTaxonomyParity``.
 """
 
 import ast
@@ -18,6 +26,7 @@ from pathlib import Path
 
 import pytest
 
+from jobcore.skills import CORPUS_MISSPELLINGS
 from jobcore import (
     SKILL_ALIASES,
     DEFAULT_TAXONOMY,
@@ -125,13 +134,48 @@ class TestComputeFitScoreParity:
 
 
 class TestTaxonomyParity:
+    """The captured table is a FLOOR that may grow, not a snapshot that may not.
+
+    It was originally asserted with ``==``. That was too strong in one
+    direction and too weak in another: it forbade the additive growth the
+    taxonomy documents as its own design, while a `==` that someone
+    regenerates to make it pass would notice nothing at all.
+
+    The three drift modes that would actually change what a live server scores
+    are an alias REMOVED, an alias RE-POINTED at a different canonical, and a
+    canonical RENAMED. All three still fail here, entry by entry. What is
+    permitted is a NEW alias — and only one that is declared in
+    ``CORPUS_MISSPELLINGS`` with a receipt, so an undeclared addition fails
+    too.
+    """
+
     def test_canonical_count_unchanged(self):
+        """A new canonical SKILL is a vocabulary decision, not a spelling fix,
+        so it does not slip in under the additive rule."""
         assert DEFAULT_TAXONOMY.canonical_count == _G["taxonomy"]["canonical_count"]
 
-    def test_alias_count_unchanged(self):
-        assert DEFAULT_TAXONOMY.alias_count == _G["taxonomy"]["alias_count"]
-
-    def test_every_alias_identical(self):
+    def test_no_captured_alias_was_removed_or_repointed(self):
         """The crown jewel, entry by entry — not just the totals."""
-        ours = {k: sorted(v) for k, v in SKILL_ALIASES.items()}
-        assert ours == _G["taxonomy"]["aliases"]
+        for canonical, aliases in _G["taxonomy"]["aliases"].items():
+            assert canonical in SKILL_ALIASES, f"canonical {canonical!r} disappeared"
+            for alias in aliases:
+                assert alias in SKILL_ALIASES[canonical], (
+                    f"alias {alias!r} no longer listed under {canonical!r}"
+                )
+                assert DEFAULT_TAXONOMY.normalize(alias) == canonical, (
+                    f"alias {alias!r} no longer resolves to {canonical!r}"
+                )
+
+    def test_every_addition_is_declared(self):
+        """Growth is allowed. UNDECLARED growth is not."""
+        pristine = {k: set(v) for k, v in _G["taxonomy"]["aliases"].items()}
+        added = {
+            canonical: sorted(aliases - pristine.get(canonical, set()))
+            for canonical, aliases in SKILL_ALIASES.items()
+            if aliases - pristine.get(canonical, set())
+        }
+        assert added == {k: sorted(v) for k, v in CORPUS_MISSPELLINGS.items()}
+
+    def test_alias_count_is_the_captured_total_plus_the_declared_additions(self):
+        declared = sum(len(v) for v in CORPUS_MISSPELLINGS.values())
+        assert DEFAULT_TAXONOMY.alias_count == _G["taxonomy"]["alias_count"] + declared

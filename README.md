@@ -58,7 +58,7 @@ fit.overall_score                        # 80
 
 | Piece | What it is |
 |---|---|
-| `SkillTaxonomy` / `SKILL_ALIASES` | **88 canonical skills, 150 aliases.** `"react"` ← `reactjs`, `react.js`, `react js`. The crown jewel. |
+| `SkillTaxonomy` / `SKILL_ALIASES` | **88 canonical skills, 155 aliases**, plus derived variants. `"react"` ← `reactjs`, `react.js`, `react js`, `react-js`. The crown jewel. |
 | `SkillMatch` | job ∩ profile, and what's missing |
 | `ExperienceScore` | sqrt over-qualification penalty (floor 60), linear −20/yr under-qualification |
 | `BonusScore` | additive +5 location, +5 remote, +5 salary fit, +5 agent-eligible |
@@ -86,6 +86,57 @@ from jobcore import DEFAULT_TAXONOMY
 mine = DEFAULT_TAXONOMY.extended({"cobol": {"cobol85", "ibm cobol"}})
 ```
 
+## Two kinds of variant, and only one of them is a table
+
+A board writes one skill many ways. Some of those ways are **semantic** —
+`"aws"` for Amazon Web Services, `"k8s"` for Kubernetes — and nothing but a
+lookup table can know them. Those are `SKILL_ALIASES`.
+
+The rest are **mechanical**: the same letters with different spacing,
+punctuation or number.
+
+```python
+normalize_skill("restapi")       # "rest api"     concatenation
+normalize_skill("postgre sql")   # "postgresql"   spurious space
+normalize_skill("Rest APIs;")    # "rest api"     trailing punctuation
+normalize_skill("microservice")  # "microservices" singular
+normalize_skill("ci-cd")         # "ci/cd"        different separator
+```
+
+Enumerating those one string at a time is a losing game — a real
+235-requisition corpus produced a fresh batch of them, and the next board will
+produce another — so `normalize()` **derives** them: it retries the lookup with
+separator characters removed, then once more with a trailing `s` added or
+dropped.
+
+Deriving costs something, and the cost is **false merges**. The obvious rule —
+strip everything that is not alphanumeric — turns both `"c#"` and `"c++"` into
+`"c"` and declares two different languages the same skill. So the derivation is
+narrow on purpose:
+
+- only a fixed separator set is removed (`` .-_/\;:,'` `` and whitespace);
+  `+` and `#` are never among them;
+- a derived key that two canonical skills would both claim is **refused**, not
+  awarded to whichever was inserted last — it resolves to neither, and
+  `DEFAULT_TAXONOMY.ambiguous_derived_keys` names any such case (empty on the
+  shipped table);
+- **exact lookup always wins**, so derivation can only ever turn a
+  previously-unresolved string into a canonical one. It cannot change an answer
+  the table already had. This is why the 179-input parity corpus still passes
+  byte-for-byte;
+- the plural step applies only from six characters up, because a trailing `s`
+  is an inflection on a long word and a coincidence on a short one. `"sas"` is
+  not the singular of `"sass"`, and `"cvs"` is version control, not computer
+  vision.
+
+`ms sql` stays distinct from `mysql`, and `github` from `git`. Those, and the
+`c#`/`c++` case, are pinned in `tests/test_normalisation.py`.
+
+Misspellings cannot be derived — no rule turns `"kubernates"` into
+`"kubernetes"` without also turning real words into each other — so they stay
+data, in `CORPUS_MISSPELLINGS`. Each one earns its place by having been seen on
+a live requisition.
+
 ## Empty is never the same as broken
 
 An unparseable salary returns an **undisclosed** `Salary` — `min_lakhs is None`,
@@ -101,21 +152,31 @@ job 0 on the salary bonus.
 pytest
 ```
 
-221 tests, ~2s, no network.
+269 tests, ~2s, no network.
 
 - **`test_parity_golden.py`** — `golden_scores.json` holds 179 inputs plus the
   full 88/150 alias table, captured by running Naukri's **pristine** scoring
   modules before the extraction. If any number or string drifts, these fail.
-  Regenerating the corpus is not a way to make a failure go away.
+  Regenerating the corpus is not a way to make a failure go away. The captured
+  alias table is asserted as a **floor**, not a snapshot: an alias removed,
+  re-pointed or renamed still fails entry by entry, while a new alias is
+  allowed only if it is declared in `CORPUS_MISSPELLINGS` — so undeclared
+  growth fails too.
+- **`test_normalisation.py`** — the mechanical variants above, every case taken
+  from a live board rather than invented, sitting next to the false merges the
+  derivation must not make.
 - **`test_independence.py`** — AST-walks every source file and fails if a
   platform package or any third-party import appears; boots a clean subprocess
   interpreter and scores a job in it.
 - **`test_engine.py`** — the behaviour that is new: injected units, injected
   taxonomy, and the loud-failure guarantees above.
 
-Both the parity and independence checks have been shown failing (a mutated
-weighting and a single removed alias both go red), which is the only reason to
-trust them when they are green.
+Every one of these has been shown failing, which is the only reason to trust
+them when they are green: a mutated weighting and a single removed alias both
+go red; the variant tests were red on 23 of 47 cases before the derivation
+landed; and the taxonomy floor was smoked against five separate mutations
+(alias removed, alias re-pointed, canonical renamed, undeclared alias added,
+declared alias never applied) and went red on all five.
 
 ## Consumers
 
