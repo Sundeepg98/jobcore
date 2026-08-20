@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "jobcore"
+version = "0.1.0"
+description = "Platform-agnostic job/profile scoring engine: skill taxonomy, fit score, salary normalisation."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Proprietary" }
+authors = [{ name = "Sundeep" }]
+keywords = ["jobs", "scoring", "skills", "taxonomy", "matching"]
+# Deliberately ZERO runtime dependencies. This library is pure stdlib so any
+# MCP server can vendor it without inheriting a dependency tree.
+dependencies = []
+
+[project.optional-dependencies]
+test = ["pytest>=8.0"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

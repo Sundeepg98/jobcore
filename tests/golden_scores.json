@@ -1,0 +1,1569 @@
+{
+ "compute_fit_score": [
+  {
+   "input": "{\"job_exp_str\": \"3-5 years\", \"job_skills\": [\"node.js\", \"react\"], \"profile_exp\": \"4 years 0 months\", \"profile_skills\": [\"node.js\", \"react\"]}",
+   "output": {
+    "experience_match": {
+     "required": "3-5 years",
+     "score": 100,
+     "your_experience": "4 years 0 months"
+    },
+    "overall_score": 100,
+    "reasons": [
+     "No location/salary/work-mode bonuses"
+    ],
+    "recommendation": "Strong match \u2014 apply confidently",
+    "skill_match": {
+     "matched": [
+      "node.js",
+      "react"
+     ],
+     "missing": [],
+     "score": 100
+    }
+   }
+  },
+  {
+   "input": "{\"job_exp_str\": \"3-5 years\", \"job_skills\": [\"aws\", \"node.js\", \"react\"], \"profile_exp\": \"1 years 0 months\", \"profile_skills\": [\"react\"]}",
+   "output": {
+    "experience_match": {
+     "required": "3-5 years",
+     "score": 60,
+     "your_experience": "1 years 0 months"
+    },
+    "overall_score": 44,
+    "reasons": [
+     "Skill gap: missing aws, node.js",
+     "Under-experienced: 1yr vs 3-5yr required",
+     "No location/salary/work-mode bonuses"
+    ],
+    "recommendation": "Partial match \u2014 review missing skills before applying",
+    "skill_match": {
+     "matched": [
+      "react"
+     ],
+     "missing": [
+      "aws",
+      "node.js"
+     ],
+     "score": 33
+    }
+   }
+  },
+  {
+   "input": "{\"job_exp_str\": \"3-5 years\", \"job_skills\": [], \"profile_exp\": \"4 years\", \"profile_skills\": [\"react\"]}",
+   "output": {
+    "experience_match": {
+     "required": "3-5 years",
+     "score": 100,
+     "your_experience": "4 years"
+    },
+    "overall_score": 70,
+    "reasons": [
+     "No location/salary/work-mode bonuses"
+    ],
+    "recommendation": "Good match \u2014 worth applying",
+    "skill_match": {
+     "matched": [],
+     "missing": [],
+     "score": 50
+    }
+   }
+  },
+  {
+   "input": "{\"job_exp_str\": \"\", \"job_skills\": [\"react\"], \"profile_exp\": null, \"profile_skills\": []}",
+   "output": {
+    "experience_match": {
+     "required": "",
+     "score": 50,
+     "your_experience": null
+    },
+    "overall_score": 20,
+    "reasons": [
+     "Skill gap: missing react",
+     "No location/salary/work-mode bonuses"
+    ],
+    "recommendation": "Weak match \u2014 consider upskilling first",
+    "skill_match": {
+     "matched": [],
+     "missing": [
+      "react"
+     ],
+     "score": 0
+    }
+   }
+  },
+  {
+   "input": "{\"job_exp_str\": \"3-5 years\", \"job_skills\": [\"react\"], \"profile_exp\": \"12 years 6 months\", \"profile_skills\": [\"react\"]}",
+   "output": {
+    "experience_match": {
+     "required": "3-5 years",
+     "score": 60,
+     "your_experience": "12 years 6 months"
+    },
+    "overall_score": 84,
+    "reasons": [
+     "Over-experienced: 12yr vs 3-5yr range",
+     "No location/salary/work-mode bonuses"
+    ],
+    "recommendation": "Strong match \u2014 apply confidently",
+    "skill_match": {
+     "matched": [
+      "react"
+     ],
+     "missing": [],
+     "score": 100
+    }
+   }
+  },
+  {
+   "input": "{\"job_exp_str\": \"10-15 years\", \"job_skills\": [\"react\"], \"profile_exp\": \"2 years\", \"profile_skills\": [\"react\"]}",
+   "output": {
+    "experience_match": {
+     "required": "10-15 years",
+     "score": 0,
+     "your_experience": "2 years"
+    },
+    "overall_score": 60,
+    "reasons": [
+     "Under-experienced: 2yr vs 10-15yr required",
+     "No location/salary/work-mode bonuses"
+    ],
+    "recommendation": "Good match \u2014 worth applying",
+    "skill_match": {
+     "matched": [
+      "react"
+     ],
+     "missing": [],
+     "score": 100
+    }
+   }
+  },
+  {
+   "input": "{\"is_agent_eligible\": true, \"job_exp_str\": \"3-5 years\", \"job_location\": \"Bangalore\", \"job_salary\": \"20-30 Lacs\", \"job_skills\": [\"aws\", \"react\"], \"job_work_mode\": \"wfh\", \"profile_exp\": \"4 years\", \"profile_expected_ctc\": 25, \"profile_location\": \"Bangalore\", \"profile_skills\": [\"aws\", \"react\"]}",
+   "output": {
+    "bonuses": {
+     "agent_eligible": 5,
+     "location": 5,
+     "salary": 5,
+     "total": 20,
+     "work_mode": 5
+    },
+    "experience_match": {
+     "required": "3-5 years",
+     "score": 100,
+     "your_experience": "4 years"
+    },
+    "overall_score": 100,
+    "reasons": [],
+    "recommendation": "Strong match \u2014 apply confidently",
+    "skill_match": {
+     "matched": [
+      "aws",
+      "react"
+     ],
+     "missing": [],
+     "score": 100
+    }
+   }
+  },
+  {
+   "input": "{\"is_agent_eligible\": false, \"job_exp_str\": \"3-5 years\", \"job_location\": \"Mumbai\", \"job_salary\": \"Not disclosed\", \"job_skills\": [\"aws\", \"react\"], \"job_work_mode\": \"office\", \"profile_exp\": \"4 years\", \"profile_expected_ctc\": 25, \"profile_location\": \"Pune\", \"profile_skills\": [\"react\"]}",
+   "output": {
+    "bonuses": {
+     "agent_eligible": 0,
+     "location": 0,
+     "salary": 0,
+     "total": 0,
+     "work_mode": 0
+    },
+    "experience_match": {
+     "required": "3-5 years",
+     "score": 100,
+     "your_experience": "4 years"
+    },
+    "overall_score": 70,
+    "reasons": [
+     "No location/salary/work-mode bonuses"
+    ],
+    "recommendation": "Good match \u2014 worth applying",
+    "skill_match": {
+     "matched": [
+      "react"
+     ],
+     "missing": [
+      "aws"
+     ],
+     "score": 50
+    }
+   }
+  },
+  {
+   "input": "{\"experience_max\": 9, \"experience_min\": 7, \"job_exp_str\": \"3-5 years\", \"job_skills\": [\"react\"], \"profile_exp\": \"4 years\", \"profile_skills\": [\"react\"]}",
+   "output": {
+    "experience_match": {
+     "required": "3-5 years",
+     "score": 40,
+     "your_experience": "4 years"
+    },
+    "overall_score": 76,
+    "reasons": [
+     "Under-experienced: 4yr vs 7-9yr required",
+     "No location/salary/work-mode bonuses"
+    ],
+    "recommendation": "Good match \u2014 worth applying",
+    "skill_match": {
+     "matched": [
+      "react"
+     ],
+     "missing": [],
+     "score": 100
+    }
+   }
+  },
+  {
+   "input": "{\"experience_max\": 6, \"experience_min\": 3, \"job_exp_str\": \"ignored\", \"job_skills\": [\"react\"], \"profile_exp\": 5, \"profile_skills\": [\"react\"]}",
+   "output": {
+    "experience_match": {
+     "required": "ignored",
+     "score": 100,
+     "your_experience": 5
+    },
+    "overall_score": 100,
+    "reasons": [
+     "No location/salary/work-mode bonuses"
+    ],
+    "recommendation": "Strong match \u2014 apply confidently",
+    "skill_match": {
+     "matched": [
+      "react"
+     ],
+     "missing": [],
+     "score": 100
+    }
+   }
+  },
+  {
+   "input": "{\"job_exp_str\": \"3-5\", \"job_skills\": [\"a\", \"b\", \"c\", \"d\"], \"profile_exp\": \"4\", \"profile_skills\": [\"a\"]}",
+   "output": {
+    "experience_match": {
+     "required": "3-5",
+     "score": 100,
+     "your_experience": "4"
+    },
+    "overall_score": 55,
+    "reasons": [
+     "Skill gap: missing b, c, d",
+     "No location/salary/work-mode bonuses"
+    ],
+    "recommendation": "Partial match \u2014 review missing skills before applying",
+    "skill_match": {
+     "matched": [
+      "a"
+     ],
+     "missing": [
+      "b",
+      "c",
+      "d"
+     ],
+     "score": 25
+    }
+   }
+  },
+  {
+   "input": "{\"is_agent_eligible\": true, \"job_exp_str\": \"3-5 years\", \"job_skills\": [\"react\"], \"profile_exp\": \"4 years\", \"profile_skills\": [\"react\"]}",
+   "output": {
+    "bonuses": {
+     "agent_eligible": 5,
+     "location": 0,
+     "salary": 0,
+     "total": 5,
+     "work_mode": 0
+    },
+    "experience_match": {
+     "required": "3-5 years",
+     "score": 100,
+     "your_experience": "4 years"
+    },
+    "overall_score": 100,
+    "reasons": [],
+    "recommendation": "Strong match \u2014 apply confidently",
+    "skill_match": {
+     "matched": [
+      "react"
+     ],
+     "missing": [],
+     "score": 100
+    }
+   }
+  },
+  {
+   "input": "{\"job_exp_str\": \"3 years\", \"job_skills\": [\"react\"], \"profile_exp\": \"4 years\", \"profile_skills\": [\"react\"]}",
+   "output": {
+    "experience_match": {
+     "required": "3 years",
+     "score": 50,
+     "your_experience": "4 years"
+    },
+    "overall_score": 80,
+    "reasons": [
+     "No location/salary/work-mode bonuses"
+    ],
+    "recommendation": "Strong match \u2014 apply confidently",
+    "skill_match": {
+     "matched": [
+      "react"
+     ],
+     "missing": [],
+     "score": 100
+    }
+   }
+  },
+  {
+   "input": "{\"job_exp_str\": \"5-7 years\", \"job_location\": \"Remote\", \"job_salary\": \"5-8 Lacs\", \"job_skills\": [\"x\", \"y\"], \"job_work_mode\": \"hybrid\", \"profile_exp\": \"0 years\", \"profile_expected_ctc\": 30, \"profile_location\": \"Anywhere-Else\", \"profile_skills\": [\"z\"]}",
+   "output": {
+    "bonuses": {
+     "agent_eligible": 0,
+     "location": 5,
+     "salary": 0,
+     "total": 8,
+     "work_mode": 3
+    },
+    "experience_match": {
+     "required": "5-7 years",
+     "score": 0,
+     "your_experience": "0 years"
+    },
+    "overall_score": 8,
+    "reasons": [
+     "Skill gap: missing x, y",
+     "Under-experienced: 0yr vs 5-7yr required"
+    ],
+    "recommendation": "Weak match \u2014 consider upskilling first",
+    "skill_match": {
+     "matched": [],
+     "missing": [
+      "x",
+      "y"
+     ],
+     "score": 0
+    }
+   }
+  }
+ ],
+ "normalize_skill": [
+  [
+   "JS",
+   "javascript"
+  ],
+  [
+   "js",
+   "javascript"
+  ],
+  [
+   "  ReactJS ",
+   "react"
+  ],
+  [
+   "react.js",
+   "react"
+  ],
+  [
+   "REACT JS",
+   "react"
+  ],
+  [
+   "TS",
+   "typescript"
+  ],
+  [
+   "py",
+   "python"
+  ],
+  [
+   "Python3",
+   "python"
+  ],
+  [
+   "Core Java",
+   "java"
+  ],
+  [
+   "csharp",
+   "c#"
+  ],
+  [
+   "cpp",
+   "c++"
+  ],
+  [
+   "go",
+   "golang"
+  ],
+  [
+   "Go Lang",
+   "golang"
+  ],
+  [
+   "rb",
+   "ruby"
+  ],
+  [
+   "rustlang",
+   "rust"
+  ],
+  [
+   "AngularJS",
+   "angular"
+  ],
+  [
+   "vue.js",
+   "vue"
+  ],
+  [
+   "nextjs",
+   "next.js"
+  ],
+  [
+   "NODEJS",
+   "node.js"
+  ],
+  [
+   "expressjs",
+   "express"
+  ],
+  [
+   "DRF",
+   "django"
+  ],
+  [
+   "flask api",
+   "flask"
+  ],
+  [
+   "springboot",
+   "spring boot"
+  ],
+  [
+   "fast api",
+   "fastapi"
+  ],
+  [
+   "dotnet",
+   ".net"
+  ],
+  [
+   "k8s",
+   "kubernetes"
+  ],
+  [
+   "containers",
+   "docker"
+  ],
+  [
+   "iac",
+   "terraform"
+  ],
+  [
+   "configuration management",
+   "ansible"
+  ],
+  [
+   "ci server",
+   "jenkins"
+  ],
+  [
+   "postgres",
+   "postgresql"
+  ],
+  [
+   "mongo",
+   "mongodb"
+  ],
+  [
+   "my sql",
+   "mysql"
+  ],
+  [
+   "redis cache",
+   "redis"
+  ],
+  [
+   "elk",
+   "elasticsearch"
+  ],
+  [
+   "kafka",
+   "apache kafka"
+  ],
+  [
+   "amqp",
+   "rabbitmq"
+  ],
+  [
+   "aws",
+   "amazon web services"
+  ],
+  [
+   "azure",
+   "microsoft azure"
+  ],
+  [
+   "gcp",
+   "google cloud platform"
+  ],
+  [
+   "cicd",
+   "ci/cd"
+  ],
+  [
+   "restful api",
+   "rest api"
+  ],
+  [
+   "graph ql",
+   "graphql"
+  ],
+  [
+   "ml",
+   "machine learning"
+  ],
+  [
+   "dl",
+   "deep learning"
+  ],
+  [
+   "nlp",
+   "natural language processing"
+  ],
+  [
+   "cv",
+   "computer vision"
+  ],
+  [
+   "ai",
+   "artificial intelligence"
+  ],
+  [
+   "data analytics",
+   "data science"
+  ],
+  [
+   "micro-services",
+   "microservices"
+  ],
+  [
+   "dev-ops",
+   "devops"
+  ],
+  [
+   "scrum",
+   "agile"
+  ],
+  [
+   "html5",
+   "html"
+  ],
+  [
+   "sass",
+   "css"
+  ],
+  [
+   "ubuntu",
+   "linux"
+  ],
+  [
+   "version control",
+   "git"
+  ],
+  [
+   "structured query language",
+   "sql"
+  ],
+  [
+   "no sql",
+   "nosql"
+  ],
+  [
+   "powerbi",
+   "power bi"
+  ],
+  [
+   "data visualization",
+   "tableau"
+  ],
+  [
+   "pyspark",
+   "apache spark"
+  ],
+  [
+   "hdfs",
+   "hadoop"
+  ],
+  [
+   "snowflake db",
+   "snowflake"
+  ],
+  [
+   "nest.js",
+   "nestjs"
+  ],
+  [
+   "react-native",
+   "react native"
+  ],
+  [
+   "apache maven",
+   "maven"
+  ],
+  [
+   "gradle build",
+   "gradle"
+  ],
+  [
+   "py.test",
+   "pytest"
+  ],
+  [
+   "junit5",
+   "junit"
+  ],
+  [
+   "k3",
+   "k3s"
+  ],
+  [
+   "kt",
+   "kotlin"
+  ],
+  [
+   "swiftui",
+   "swift"
+  ],
+  [
+   "dart",
+   "flutter"
+  ],
+  [
+   "keras",
+   "tensorflow"
+  ],
+  [
+   "torch",
+   "pytorch"
+  ],
+  [
+   "sklearn",
+   "scikit-learn"
+  ],
+  [
+   "webdriver",
+   "selenium"
+  ],
+  [
+   "cypress.io",
+   "cypress"
+  ],
+  [
+   "pw",
+   "playwright"
+  ],
+  [
+   "apache airflow",
+   "airflow"
+  ],
+  [
+   "data build tool",
+   "dbt"
+  ],
+  [
+   "sveltekit",
+   "svelte"
+  ],
+  [
+   "nuxtjs",
+   "nuxt"
+  ],
+  [
+   "remix.run",
+   "remix"
+  ],
+  [
+   "supa",
+   "supabase"
+  ],
+  [
+   "firestore",
+   "firebase"
+  ],
+  [
+   "dd",
+   "datadog"
+  ],
+  [
+   "grafana cloud",
+   "grafana"
+  ],
+  [
+   "prom",
+   "prometheus"
+  ],
+  [
+   "splunk cloud",
+   "splunk"
+  ],
+  [
+   "aws sqs",
+   "sqs"
+  ],
+  [
+   "amazon sns",
+   "sns"
+  ],
+  [
+   "figma design",
+   "figma"
+  ],
+  [
+   "COBOL",
+   "cobol"
+  ],
+  [
+   "  Fortran  ",
+   "fortran"
+  ],
+  [
+   "quantum widgets",
+   "quantum widgets"
+  ],
+  [
+   "",
+   ""
+  ]
+ ],
+ "parse_skills": [
+  [
+   "'React, Node.js, AWS'",
+   [
+    "amazon web services",
+    "node.js",
+    "react"
+   ]
+  ],
+  [
+   "'js,ts,py'",
+   [
+    "javascript",
+    "python",
+    "typescript"
+   ]
+  ],
+  [
+   "'  Spring , SpringBoot ,  spring-boot  '",
+   [
+    "spring boot"
+   ]
+  ],
+  [
+   "['reactjs', 'NODEJS', 'typescript']",
+   [
+    "node.js",
+    "react",
+    "typescript"
+   ]
+  ],
+  [
+   "('k8s', 'docker', '')",
+   [
+    "docker",
+    "kubernetes"
+   ]
+  ],
+  [
+   "{'gcp', 'azure', 'aws'}",
+   [
+    "amazon web services",
+    "google cloud platform",
+    "microsoft azure"
+   ]
+  ],
+  [
+   "''",
+   []
+  ],
+  [
+   "'   '",
+   []
+  ],
+  [
+   "None",
+   []
+  ],
+  [
+   "123",
+   []
+  ],
+  [
+   "['', '  ', 'valid']",
+   [
+    "valid"
+   ]
+  ],
+  [
+   "[1, 2, 'react']",
+   [
+    "react"
+   ]
+  ]
+ ],
+ "salary": [
+  {
+   "compare_to_ctc_15": 5,
+   "compare_to_ctc_bad": 0,
+   "compare_to_ctc_str25": 0,
+   "is_disclosed": true,
+   "market_position_12": "at_market",
+   "market_position_30": "below",
+   "max_lakhs": 15.0,
+   "midpoint": 12.5,
+   "min_lakhs": 10.0,
+   "raw": "10-15 Lacs",
+   "raw_in": "10-15 Lacs"
+  },
+  {
+   "compare_to_ctc_15": 0,
+   "compare_to_ctc_bad": 0,
+   "compare_to_ctc_str25": 0,
+   "is_disclosed": false,
+   "market_position_12": "unknown",
+   "market_position_30": "unknown",
+   "max_lakhs": null,
+   "midpoint": null,
+   "min_lakhs": null,
+   "raw": "Not disclosed",
+   "raw_in": "Not disclosed"
+  },
+  {
+   "compare_to_ctc_15": 0,
+   "compare_to_ctc_bad": 0,
+   "compare_to_ctc_str25": 0,
+   "is_disclosed": false,
+   "market_position_12": "unknown",
+   "market_position_30": "unknown",
+   "max_lakhs": null,
+   "midpoint": null,
+   "min_lakhs": null,
+   "raw": "NOT DISCLOSED",
+   "raw_in": "NOT DISCLOSED"
+  },
+  {
+   "compare_to_ctc_15": 0,
+   "compare_to_ctc_bad": 0,
+   "compare_to_ctc_str25": 0,
+   "is_disclosed": false,
+   "market_position_12": "unknown",
+   "market_position_30": "unknown",
+   "max_lakhs": null,
+   "midpoint": null,
+   "min_lakhs": null,
+   "raw": "Confidential",
+   "raw_in": "Confidential"
+  },
+  {
+   "compare_to_ctc_15": 5,
+   "compare_to_ctc_bad": 0,
+   "compare_to_ctc_str25": 0,
+   "is_disclosed": true,
+   "market_position_12": "above",
+   "market_position_30": "below",
+   "max_lakhs": 15.0,
+   "midpoint": 15.0,
+   "min_lakhs": 15.0,
+   "raw": "15 LPA",
+   "raw_in": "15 LPA"
+  },
+  {
+   "compare_to_ctc_15": 5,
+   "compare_to_ctc_bad": 0,
+   "compare_to_ctc_str25": 0,
+   "is_disclosed": true,
+   "market_position_12": "above",
+   "market_position_30": "below",
+   "max_lakhs": 18.0,
+   "midpoint": 15.0,
+   "min_lakhs": 12.0,
+   "raw": "1,200,000-1,800,000",
+   "raw_in": "1,200,000-1,800,000"
+  },
+  {
+   "compare_to_ctc_15": 0,
+   "compare_to_ctc_bad": 0,
+   "compare_to_ctc_str25": 0,
+   "is_disclosed": true,
+   "market_position_12": "below",
+   "market_position_30": "below",
+   "max_lakhs": 5.0,
+   "midpoint": 5.0,
+   "min_lakhs": 5.0,
+   "raw": "500000",
+   "raw_in": "500000"
+  },
+  {
+   "compare_to_ctc_15": 3,
+   "compare_to_ctc_bad": 0,
+   "compare_to_ctc_str25": 0,
+   "is_disclosed": true,
+   "market_position_12": "at_market",
+   "market_position_30": "below",
+   "max_lakhs": 12.5,
+   "midpoint": 10.5,
+   "min_lakhs": 8.5,
+   "raw": "8.5-12.5 Lakhs",
+   "raw_in": "8.5-12.5 Lakhs"
+  },
+  {
+   "compare_to_ctc_15": 0,
+   "compare_to_ctc_bad": 0,
+   "compare_to_ctc_str25": 0,
+   "is_disclosed": true,
+   "market_position_12": "below",
+   "market_position_30": "below",
+   "max_lakhs": 0.0,
+   "midpoint": 0.0,
+   "min_lakhs": 0.0,
+   "raw": "0",
+   "raw_in": "0"
+  },
+  {
+   "compare_to_ctc_15": 0,
+   "compare_to_ctc_bad": 0,
+   "compare_to_ctc_str25": 0,
+   "is_disclosed": false,
+   "market_position_12": "unknown",
+   "market_position_30": "unknown",
+   "max_lakhs": null,
+   "midpoint": null,
+   "min_lakhs": null,
+   "raw": "",
+   "raw_in": ""
+  },
+  {
+   "compare_to_ctc_15": 0,
+   "compare_to_ctc_bad": 0,
+   "compare_to_ctc_str25": 0,
+   "is_disclosed": false,
+   "market_position_12": "unknown",
+   "market_position_30": "unknown",
+   "max_lakhs": null,
+   "midpoint": null,
+   "min_lakhs": null,
+   "raw": "   ",
+   "raw_in": "   "
+  },
+  {
+   "compare_to_ctc_15": 0,
+   "compare_to_ctc_bad": 0,
+   "compare_to_ctc_str25": 0,
+   "is_disclosed": false,
+   "market_position_12": "unknown",
+   "market_position_30": "unknown",
+   "max_lakhs": null,
+   "midpoint": null,
+   "min_lakhs": null,
+   "raw": "abc",
+   "raw_in": "abc"
+  },
+  {
+   "compare_to_ctc_15": 5,
+   "compare_to_ctc_bad": 0,
+   "compare_to_ctc_str25": 5,
+   "is_disclosed": true,
+   "market_position_12": "above",
+   "market_position_30": "below",
+   "max_lakhs": 30.0,
+   "midpoint": 25.0,
+   "min_lakhs": 20.0,
+   "raw": "20-30",
+   "raw_in": "20-30"
+  },
+  {
+   "compare_to_ctc_15": 0,
+   "compare_to_ctc_bad": 0,
+   "compare_to_ctc_str25": 0,
+   "is_disclosed": true,
+   "market_position_12": "below",
+   "market_position_30": "below",
+   "max_lakhs": 3.5,
+   "midpoint": 3.5,
+   "min_lakhs": 3.5,
+   "raw": "3.5",
+   "raw_in": "3.5"
+  },
+  {
+   "compare_to_ctc_15": 5,
+   "compare_to_ctc_bad": 0,
+   "compare_to_ctc_str25": 0,
+   "is_disclosed": true,
+   "market_position_12": "above",
+   "market_position_30": "below",
+   "max_lakhs": 15.0,
+   "midpoint": 15.0,
+   "min_lakhs": 15.0,
+   "raw": "1500000",
+   "raw_in": "1500000"
+  },
+  {
+   "compare_to_ctc_15": 5,
+   "compare_to_ctc_bad": 0,
+   "compare_to_ctc_str25": 0,
+   "is_disclosed": true,
+   "market_position_12": "above",
+   "market_position_30": "below",
+   "max_lakhs": 18.0,
+   "midpoint": 15.0,
+   "min_lakhs": 12.0,
+   "raw": "\u20b912,00,000 - \u20b918,00,000 P.A.",
+   "raw_in": "\u20b912,00,000 - \u20b918,00,000 P.A."
+  }
+ ],
+ "salary_nonstring": [
+  [
+   "None",
+   null,
+   null,
+   "",
+   false
+  ],
+  [
+   "12345",
+   null,
+   null,
+   12345,
+   false
+  ],
+  [
+   "['10-15']",
+   null,
+   null,
+   [
+    "10-15"
+   ],
+   false
+  ],
+  [
+   "{'a': 1}",
+   null,
+   null,
+   {
+    "a": 1
+   },
+   false
+  ]
+ ],
+ "score_location": [
+  [
+   "Bangalore",
+   "Bangalore",
+   5
+  ],
+  [
+   "Bangalore/Bengaluru",
+   "Bangalore",
+   5
+  ],
+  [
+   "Remote",
+   "Pune",
+   5
+  ],
+  [
+   "WFH",
+   "Chennai",
+   5
+  ],
+  [
+   "Work From Home",
+   "Delhi",
+   5
+  ],
+  [
+   "Anywhere",
+   "Kochi",
+   5
+  ],
+  [
+   "Mumbai",
+   "Pune",
+   0
+  ],
+  [
+   null,
+   "Pune",
+   0
+  ],
+  [
+   "Mumbai",
+   null,
+   0
+  ],
+  [
+   "",
+   "Pune",
+   0
+  ],
+  [
+   "  BANGALORE  ",
+   "bangalore",
+   5
+  ]
+ ],
+ "score_salary": [
+  [
+   "'10-15 Lacs'",
+   "15",
+   5
+  ],
+  [
+   "'10-15 Lacs'",
+   "20",
+   0
+  ],
+  [
+   "'10-15 Lacs'",
+   "18",
+   3
+  ],
+  [
+   "'10-15 Lacs'",
+   "'15'",
+   5
+  ],
+  [
+   "'10-15 Lacs'",
+   "'15.0 Lacs'",
+   5
+  ],
+  [
+   "'10-15 Lacs'",
+   "None",
+   0
+  ],
+  [
+   "None",
+   "15",
+   0
+  ],
+  [
+   "'Not disclosed'",
+   "15",
+   0
+  ],
+  [
+   "''",
+   "15",
+   0
+  ],
+  [
+   "'10-15 Lacs'",
+   "'abc'",
+   0
+  ],
+  [
+   "'10-15 Lacs'",
+   "[1]",
+   0
+  ],
+  [
+   "'1500000-2000000'",
+   "15",
+   5
+  ],
+  [
+   "'10-15 Lacs'",
+   "0",
+   5
+  ]
+ ],
+ "score_work_mode": [
+  [
+   "wfh",
+   5
+  ],
+  [
+   "WFH",
+   5
+  ],
+  [
+   "remote",
+   5
+  ],
+  [
+   "Work From Home",
+   5
+  ],
+  [
+   "hybrid",
+   3
+  ],
+  [
+   "HYBRID",
+   3
+  ],
+  [
+   "office",
+   0
+  ],
+  [
+   "Office",
+   0
+  ],
+  [
+   "",
+   0
+  ],
+  [
+   null,
+   0
+  ],
+  [
+   "  remote  ",
+   5
+  ],
+  [
+   "onsite",
+   0
+  ]
+ ],
+ "taxonomy": {
+  "alias_count": 150,
+  "aliases": {
+   ".net": [
+    "asp.net",
+    "dot net",
+    "dotnet"
+   ],
+   "agile": [
+    "kanban",
+    "scrum"
+   ],
+   "airflow": [
+    "apache airflow"
+   ],
+   "amazon web services": [
+    "aws"
+   ],
+   "angular": [
+    "angular js",
+    "angular.js",
+    "angularjs"
+   ],
+   "ansible": [
+    "configuration management"
+   ],
+   "apache kafka": [
+    "kafka"
+   ],
+   "apache spark": [
+    "pyspark",
+    "spark"
+   ],
+   "artificial intelligence": [
+    "ai"
+   ],
+   "c#": [
+    "c sharp",
+    "csharp"
+   ],
+   "c++": [
+    "cplusplus",
+    "cpp"
+   ],
+   "ci/cd": [
+    "ci cd",
+    "cicd",
+    "continuous deployment",
+    "continuous integration"
+   ],
+   "computer vision": [
+    "cv"
+   ],
+   "css": [
+    "css3",
+    "less",
+    "sass",
+    "scss"
+   ],
+   "cypress": [
+    "cypress.io"
+   ],
+   "data science": [
+    "data analytics"
+   ],
+   "datadog": [
+    "dd"
+   ],
+   "dbt": [
+    "data build tool"
+   ],
+   "deep learning": [
+    "dl"
+   ],
+   "devops": [
+    "dev ops",
+    "dev-ops"
+   ],
+   "django": [
+    "django rest framework",
+    "drf"
+   ],
+   "docker": [
+    "containerization",
+    "containers"
+   ],
+   "elasticsearch": [
+    "elastic",
+    "elastic search",
+    "elk"
+   ],
+   "express": [
+    "express.js",
+    "expressjs"
+   ],
+   "fastapi": [
+    "fast api"
+   ],
+   "figma": [
+    "figma design"
+   ],
+   "firebase": [
+    "firestore"
+   ],
+   "flask": [
+    "flask api"
+   ],
+   "flutter": [
+    "dart"
+   ],
+   "git": [
+    "version control"
+   ],
+   "golang": [
+    "go",
+    "go lang"
+   ],
+   "google cloud platform": [
+    "gcp",
+    "google cloud"
+   ],
+   "gradle": [
+    "gradle build"
+   ],
+   "grafana": [
+    "grafana cloud"
+   ],
+   "graphql": [
+    "graph ql"
+   ],
+   "hadoop": [
+    "hdfs",
+    "mapreduce"
+   ],
+   "html": [
+    "html5"
+   ],
+   "java": [
+    "core java",
+    "java11",
+    "java17",
+    "java8"
+   ],
+   "javascript": [
+    "ecmascript",
+    "es2015",
+    "es6",
+    "js",
+    "vanilla js"
+   ],
+   "jenkins": [
+    "ci server"
+   ],
+   "junit": [
+    "junit4",
+    "junit5"
+   ],
+   "k3s": [
+    "k3"
+   ],
+   "kotlin": [
+    "kt"
+   ],
+   "kubernetes": [
+    "k8",
+    "k8s"
+   ],
+   "linux": [
+    "centos",
+    "rhel",
+    "ubuntu",
+    "unix"
+   ],
+   "machine learning": [
+    "ml"
+   ],
+   "maven": [
+    "apache maven"
+   ],
+   "microservices": [
+    "micro services",
+    "micro-services"
+   ],
+   "microsoft azure": [
+    "azure"
+   ],
+   "mongodb": [
+    "mongo",
+    "mongo db"
+   ],
+   "mysql": [
+    "my sql"
+   ],
+   "natural language processing": [
+    "nlp"
+   ],
+   "nestjs": [
+    "nest",
+    "nest js",
+    "nest.js"
+   ],
+   "next.js": [
+    "next",
+    "nextjs"
+   ],
+   "node.js": [
+    "node",
+    "node js",
+    "nodejs"
+   ],
+   "nosql": [
+    "no sql",
+    "non-relational"
+   ],
+   "nuxt": [
+    "nuxt.js",
+    "nuxtjs"
+   ],
+   "playwright": [
+    "pw"
+   ],
+   "postgresql": [
+    "pgsql",
+    "postgres",
+    "psql"
+   ],
+   "power bi": [
+    "powerbi"
+   ],
+   "prometheus": [
+    "prom"
+   ],
+   "pytest": [
+    "py.test"
+   ],
+   "python": [
+    "py",
+    "python3"
+   ],
+   "pytorch": [
+    "torch"
+   ],
+   "rabbitmq": [
+    "amqp",
+    "rabbit mq"
+   ],
+   "react": [
+    "react js",
+    "react.js",
+    "reactjs"
+   ],
+   "react native": [
+    "react-native",
+    "reactnative"
+   ],
+   "redis": [
+    "redis cache"
+   ],
+   "remix": [
+    "remix.run"
+   ],
+   "rest api": [
+    "rest",
+    "rest apis",
+    "restful",
+    "restful api"
+   ],
+   "ruby": [
+    "rb"
+   ],
+   "rust": [
+    "rustlang"
+   ],
+   "scikit-learn": [
+    "sklearn"
+   ],
+   "selenium": [
+    "webdriver"
+   ],
+   "snowflake": [
+    "snowflake db"
+   ],
+   "sns": [
+    "amazon sns",
+    "aws sns"
+   ],
+   "splunk": [
+    "splunk cloud"
+   ],
+   "spring boot": [
+    "spring",
+    "spring-boot",
+    "springboot"
+   ],
+   "sql": [
+    "structured query language"
+   ],
+   "sqs": [
+    "amazon sqs",
+    "aws sqs"
+   ],
+   "supabase": [
+    "supa"
+   ],
+   "svelte": [
+    "sveltekit"
+   ],
+   "swift": [
+    "swiftui"
+   ],
+   "tableau": [
+    "data visualization"
+   ],
+   "tensorflow": [
+    "keras"
+   ],
+   "terraform": [
+    "iac",
+    "infrastructure as code",
+    "tf"
+   ],
+   "typescript": [
+    "ts"
+   ],
+   "vue": [
+    "vue js",
+    "vue.js",
+    "vuejs"
+   ]
+  },
+  "canonical_count": 88
+ }
+}
