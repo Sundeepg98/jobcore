@@ -40,6 +40,8 @@ false merges it must not make.
 
 from __future__ import annotations
 
+import unicodedata
+
 
 # ── Skill Alias Map ──────────────────────────────────────────────────────────
 # Canonical skill name -> set of known aliases.
@@ -171,6 +173,45 @@ def _merge_misspellings() -> None:
 _merge_misspellings()
 
 
+# ── Surface hygiene ──────────────────────────────────
+
+# Characters a word processor substitutes for the plain ASCII ones. None of them
+# is ever part of a skill NAME -- they are artefacts of where the text was
+# typed, and they arrive whenever a human drafts a search string in Word or
+# Google Docs and pastes it into a board. In one live capture of 704 recruiter
+# keywords, 20 carried one of these; each became its own taxonomy entry, so the
+# same skill was counted twice and the decorated copy matched nothing.
+_QUOTE_CHARS = "“”‘’„‚′″«»\""
+_DASH_CHARS = "‐‑‒–—―−"
+
+_SURFACE_TABLE: dict[int, object] = {ord(ch): None for ch in _QUOTE_CHARS}
+# Dashes FOLD onto the ASCII hyphen rather than being deleted: "-" is already a
+# separator for derived lookup, so "type-script" and the prettified "type–script"
+# become the same string for free. Deleting them outright would also silently
+# join words that nobody joined.
+_SURFACE_TABLE.update({ord(ch): "-" for ch in _DASH_CHARS})
+
+
+def _clean_surface(skill: str) -> str:
+    """Lowercase a raw skill string and drop the artefacts of human typing.
+
+    Runs BEFORE every lookup, so it must be a no-op on anything already in the
+    table -- and it is: NFKC is the identity on ASCII, no table entry contains a
+    quote or a non-ASCII dash, and collapsing whitespace runs cannot change a
+    string that has none. ``test_cleaning_is_a_no_op_for_every_string_already_in_the_table``
+    asserts exactly that over the real table rather than a sample, because the
+    failure mode here is silent: a cleaner that altered a known alias would stop
+    it resolving for some skills only.
+
+    NFKC also folds U+00A0 NO-BREAK SPACE to an ordinary space, which
+    ``str.strip()`` does not -- two of those 704 live keywords had every space
+    replaced by one, so they could never match anything.
+    """
+    text = unicodedata.normalize("NFKC", skill)
+    text = text.translate(_SURFACE_TABLE)
+    return " ".join(text.split()).lower()
+
+
 # ── Mechanical variant derivation ────────────────────────────────────────────
 
 # Characters dropped before the fallback ("derived") lookup. Spelled out rather
@@ -239,7 +280,7 @@ class SkillTaxonomy:
 
         Unknown input is returned lowercased and stripped, never dropped.
         """
-        raw = skill.lower().strip()
+        raw = _clean_surface(skill)
 
         canonical = self._lookup.get(raw)
         if canonical is not None:
