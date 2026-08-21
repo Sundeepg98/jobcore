@@ -114,9 +114,37 @@ sites build `FitScore` directly and never touch an engine, and one consumer
 An engine-only seam would have produced a split-brain in which the daily brief
 honoured his weights and the agent's own scorer did not.
 
-A result stamps itself with a `policy_hash` whenever the policy is not the
+A result stamps itself with a `scoring_hash` whenever the policy is not the
 shipped default — so two scores are comparable exactly when their hashes match,
 and you can tell.
+
+### Two hashes, two questions — do not compare across them
+
+The library prints two 12-hex fingerprints. They are not interchangeable, and
+until 2026-08-21 they were both called `policy_hash`, which made one identical
+policy report `4775805cf740` from one site and `7e664cb97b54` from the other.
+
+| field | covers | answers | printed by |
+|---|---|---|---|
+| `scoring_hash` | `scoring` | *was the same **arithmetic** applied?* | a scored **result** — `to_dict(stamp=True)`, `explain()` |
+| `policy_hash` | `scoring` + `candidate` | *was the same **policy** in effect?* | a **config readout** — `Loaded.report()`, the ledger, `requires_approval_cycle` |
+
+A result carries only `scoring_hash` on purpose. `profile_skills` is a call
+argument, and on two of the three consumer servers it does not come from the
+config file at all — `instahyre_rank_jobs(my_skills=[...])` scores against
+whatever the caller passes. A candidate-covering stamp on such a result would
+assert something the result cannot vouch for.
+
+A config readout prints **both**, and that is the bridge: comparing a stored
+result's `scoring_hash` against a readout's `scoring_hash` answers "was this
+score produced by the arithmetic currently on disk?" — a question that had no
+correct answer while the two fields shared a name.
+
+`requires_approval_cycle` must be fed `policy_hash`, never `scoring_hash`.
+Both are 12 hex characters and both compare cleanly, so the wrong one fails
+silently *and open*: inflating `candidate.skills` moves no arithmetic, so a
+scoring-only hash would not change, so the widened cycle would run in auto.
+`tests/test_stamp_identity.py` is the guard.
 
 ## Reading the file: `jobcore.config`
 
@@ -185,8 +213,10 @@ inflating `candidate.skills` until every job scores 100, and collapsing
 `scoring.weights` onto whichever component a job maxes out. Neither can be
 Tier C (they are the point of the feature). They are bounded instead, by
 `HARD_LIMITS` and by `requires_approval_cycle`: any cycle that observes a
-scoring fingerprint it has not seen runs in approval mode regardless of the
-configured mode.
+**policy** fingerprint it has not seen runs in approval mode regardless of the
+configured mode. That is `policy_hash`, the one covering `candidate` — feeding
+it `scoring_hash` would reopen the `candidate.skills` lever it exists to close,
+and would do so without a single test going red.
 
 `test_safety_invariant.py` does not assert that the guards exist — it runs the
 attack. Both traced paths, all six writes, plus a hand-edited file carrying the
