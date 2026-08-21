@@ -191,7 +191,23 @@ HARD_LIMITS = FrozenMap({
     # fit.py's min(100, ...) collapse. The bonus block may shrink, never grow.
     "bonus_cap_ceiling": 20,
     "bonus_max": 10,
+    # A rank adjustment reorders a result list; it never moves overall_score.
+    # This bound is the CALIBRATION uplers' deleted PREFERENCE_TILT carried in
+    # a comment: strictly under the smallest structural bonus (+5 for location
+    # match / remote / salary fit / agent-eligible), so a stack preference can
+    # decide a near-tie but can never outrank "this role is actually remote".
+    # The clamp is applied to the SUM as well as to each rule, so N rules
+    # cannot stack past it either.
+    "rank_adjustment_max": 4,
+    # A rule list long enough to be unauditable is not a preference.
+    "rank_adjustment_rules_max": 20,
 })
+
+#: Frozen at import, like the KeySpec bounds, so rewriting ``HARD_LIMITS`` in
+#: a live process cannot widen the ordering clamp by assignment. The config
+#: file cannot reach either name.
+_RANK_ADJUSTMENT_MAX: float = float(HARD_LIMITS["rank_adjustment_max"])
+_RANK_ADJUSTMENT_RULES_MAX: int = int(HARD_LIMITS["rank_adjustment_rules_max"])
 
 
 # ── Trust tiers + the schema that carries them ─────────────────────────────
@@ -440,6 +456,28 @@ _SCHEMA_LIST: tuple[KeySpec, ...] = (
               (40, "Partial match — review missing skills before applying"),
               (0, "Weak match — consider upskilling first"),
           )),
+    _spec(
+        "scoring.rank_adjustments", TIER_A,
+        "ORDERING preferences: [{when_skills_include, and_not, delta, "
+        "label}]. NEVER moves overall_score -- that stays jobcore's, so a 78 "
+        "means the same thing on every board; the adjustment is reported "
+        "separately. Default is the single rule uplers used to carry as the "
+        "hardcoded PREFERENCE_TILT = 4 (demote a python-leaning stack that "
+        "does not also ask for the node one), so nothing moves until he "
+        "edits it. Each delta AND their sum are clamped to "
+        "HARD_LIMITS['rank_adjustment_max'] = 4 in Python, which is strictly "
+        "under the smallest structural bonus (+5). An explicit [] turns the "
+        "preference off; omitting the key keeps the shipped rule.",
+        ("uplers",),
+        default=(
+            {"when_skills_include": ["python", "django", "flask", "fastapi"],
+             "and_not": ["javascript", "typescript", "node.js", "express",
+                         "nestjs", "next.js"],
+             "delta": -4,
+             "label": "python-leaning stack"},
+        ),
+        max_items=int(HARD_LIMITS["rank_adjustment_rules_max"]),
+    ),
     _spec("scoring.reasons.skill_gap_below", TIER_A,
           "fit.py's 50 -- below this a skill-gap reason is emitted.",
           ("jobcore",), default=50, floor=0.0, ceiling=100.0),
@@ -929,6 +967,142 @@ _DEFAULT_VERDICTS: tuple[Verdict, ...] = (
 
 
 @dataclass(frozen=True)
+class RankRule:
+    """One ORDERING preference, expressed over a job's skill set.
+
+    This is deliberately NOT a score change. ``overall_score`` stays exactly
+    jobcore's, so a 78 means the same thing on every board that uses this
+    package — which is the invariant jobcore exists to hold. A rule moves the
+    ORDER and is reported separately, with its label, so the reader can see
+    why one row is above another.
+
+    It is also deliberately not ``scoring.skills.weights``. Weighted coverage
+    is ``sum(w[matched]) / sum(w[job])``, which CANCELS whenever the matched
+    set equals the job set (a pure-Python role against a profile holding
+    Python is untouched) and RAISES the score of a job asking for a
+    down-weighted skill the candidate lacks. Measured: `{node.js, django}`
+    scores 50 flat and 58.8 with ``django`` at 0.7. A demotion expressed that
+    way runs backwards on the modal case.
+
+    Args:
+        when_skills_include: the rule fires when the job asks for ANY of
+            these. Empty means the rule can never fire, and is refused.
+        and_not: ...unless the job also asks for any of THESE. This is the
+            "a role wanting both stacks is already the direction he is moving
+            in" clause, and it is why one signed number per skill is not
+            enough to express the preference.
+        delta: points added to the ordering key. Negative demotes. Bounded by
+            ``HARD_LIMITS['rank_adjustment_max']``.
+        label: why. Required — a row that prints an adjustment it cannot
+            explain is worse than no adjustment.
+    """
+
+    when_skills_include: tuple[str, ...] = ()
+    and_not: tuple[str, ...] = ()
+    delta: float = 0
+    label: str = ""
+
+    def validate(self, index: int = 0) -> None:
+        where = f"scoring.rank_adjustments[{index}]"
+        if not self.when_skills_include:
+            raise PolicyError(
+                f"{where}.when_skills_include is empty, so the rule can never "
+                f"fire. A rule that matches nothing is a decoy."
+            )
+        for name, seq in (("when_skills_include", self.when_skills_include),
+                          ("and_not", self.and_not)):
+            for entry in seq:
+                if not isinstance(entry, str) or not entry.strip():
+                    raise PolicyError(
+                        f"{where}.{name} must hold non-empty skill names, "
+                        f"got {entry!r}"
+                    )
+        overlap = self._lower(self.when_skills_include) & self._lower(self.and_not)
+        if overlap:
+            raise PolicyError(
+                f"{where}: {sorted(overlap)} appears in both "
+                f"when_skills_include and and_not, so the rule can never "
+                f"fire — the and_not clause always cancels the match."
+            )
+        if isinstance(self.delta, bool) or not isinstance(self.delta, (int, float)):
+            raise PolicyError(f"{where}.delta must be a number, got {self.delta!r}")
+        cap = _RANK_ADJUSTMENT_MAX
+        if abs(self.delta) > cap:
+            raise PolicyError(
+                f"{where}.delta={self.delta} exceeds ±{cap:g}. That bound is "
+                f"the calibration: strictly under the smallest structural "
+                f"bonus (+5), so a stack preference can break a near-tie but "
+                f"never outrank a real signal like 'this role is remote'. It "
+                f"is not in the config file and cannot be raised from it."
+            )
+        if not isinstance(self.label, str) or not self.label.strip():
+            raise PolicyError(
+                f"{where}.label is required: a row may not print an "
+                f"adjustment it cannot explain."
+            )
+
+    @staticmethod
+    def _lower(seq) -> set:
+        return {str(s).strip().lower() for s in seq if str(s).strip()}
+
+    def matches(self, skills) -> bool:
+        """True when *skills* (canonical names) trigger this rule."""
+        have = self._lower(skills)
+        if not have:
+            return False
+        if not (have & self._lower(self.when_skills_include)):
+            return False
+        if self.and_not and (have & self._lower(self.and_not)):
+            return False
+        return True
+
+    def to_dict(self) -> dict:
+        return {
+            "when_skills_include": list(self.when_skills_include),
+            "and_not": list(self.and_not),
+            "delta": self.delta,
+            "label": self.label,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping) -> "RankRule":
+        if not isinstance(data, Mapping):
+            raise PolicyError(
+                f"scoring.rank_adjustments entries must be objects with "
+                f"when_skills_include / and_not / delta / label, got {data!r}"
+            )
+        d = dict(data)
+        unknown = set(d) - {"when_skills_include", "and_not", "delta", "label"}
+        if unknown:
+            raise PolicyError(
+                f"scoring.rank_adjustments entry has unknown field(s) "
+                f"{sorted(unknown)}; nothing reads them."
+            )
+        return cls(
+            when_skills_include=tuple(d.get("when_skills_include") or ()),
+            and_not=tuple(d.get("and_not") or ()),
+            delta=_num(d.get("delta"), 0),
+            label=str(d.get("label") or ""),
+        )
+
+
+#: uplers carried this as ``PREFERENCE_TILT = 4`` plus two hardcoded
+#: frozensets, in a sibling repo, where the operator could not reach it. It is
+#: his stated preference — "keep Python but rank it lower" — so it belongs in
+#: the file he edits. The DEFAULT is exactly what the constant did, so nothing
+#: moves until he changes it.
+_DEFAULT_RANK_ADJUSTMENTS: tuple[RankRule, ...] = (
+    RankRule(
+        when_skills_include=("python", "django", "flask", "fastapi"),
+        and_not=("javascript", "typescript", "node.js", "express",
+                 "nestjs", "next.js"),
+        delta=-4,
+        label="python-leaning stack",
+    ),
+)
+
+
+@dataclass(frozen=True)
 class ScoringPolicy:
     """Everything that can move a number. This is what gets fingerprinted."""
 
@@ -939,6 +1113,7 @@ class ScoringPolicy:
     salary: SalaryPolicy = field(default_factory=SalaryPolicy)
     verdicts: tuple[Verdict, ...] = _DEFAULT_VERDICTS
     reasons: ReasonsPolicy = field(default_factory=ReasonsPolicy)
+    rank_adjustments: tuple[RankRule, ...] = _DEFAULT_RANK_ADJUSTMENTS
 
     def validate(self) -> None:
         self.weights.validate()
@@ -947,6 +1122,15 @@ class ScoringPolicy:
         self.skills.validate()
         self.salary.validate()
         self.reasons.validate()
+        rules_cap = _RANK_ADJUSTMENT_RULES_MAX
+        if len(self.rank_adjustments) > rules_cap:
+            raise PolicyError(
+                f"scoring.rank_adjustments has {len(self.rank_adjustments)} "
+                f"rules, over the maximum of {rules_cap}. A rule list nobody "
+                f"can audit is not a preference."
+            )
+        for index, rule in enumerate(self.rank_adjustments):
+            rule.validate(index)
         if not self.verdicts:
             raise PolicyError("scoring.verdicts must not be empty")
         mins = [v.min for v in self.verdicts]
@@ -966,6 +1150,27 @@ class ScoringPolicy:
             if score >= band.min:
                 return band
         return self.verdicts[-1]
+
+    def rank_adjustment(self, skills) -> tuple:
+        """``(delta, labels)`` for a job asking for *skills*.
+
+        Deltas from every matching rule are summed and then clamped to
+        ``±HARD_LIMITS['rank_adjustment_max']``, so the ordering preference
+        stays under the smallest structural bonus no matter how many rules
+        are written. Returns ``(0, ())`` when nothing matches, which is what
+        every job on the board gets today except a python-leaning one.
+        """
+        total: float = 0.0
+        labels: list[str] = []
+        for rule in self.rank_adjustments:
+            if rule.matches(skills):
+                total += rule.delta
+                labels.append(rule.label)
+        cap = _RANK_ADJUSTMENT_MAX
+        total = max(-cap, min(cap, total))
+        if float(total).is_integer():
+            total = int(total)
+        return (total, tuple(labels))
 
     def to_dict(self) -> dict:
         return {
@@ -1007,6 +1212,7 @@ class ScoringPolicy:
                 "experience_below": self.reasons.experience_below,
                 "missing_skills_shown": self.reasons.missing_skills_shown,
             },
+            "rank_adjustments": [r.to_dict() for r in self.rank_adjustments],
         }
 
     @classmethod
@@ -1029,6 +1235,20 @@ class ScoringPolicy:
             )
         else:
             bands = _DEFAULT_VERDICTS
+        # ``None`` (absent) reverts to the shipped rule, per the None-means-
+        # default convention. An explicit ``[]`` is NOT the same thing: it is
+        # "no ordering preference at all", which has to be expressible or
+        # turning the tilt off would be impossible from the file.
+        raw_rules = d.get("rank_adjustments")
+        if raw_rules is None:
+            rules = _DEFAULT_RANK_ADJUSTMENTS
+        elif isinstance(raw_rules, (list, tuple)):
+            rules = tuple(RankRule.from_dict(r) for r in raw_rules)
+        else:
+            raise PolicyError(
+                f"scoring.rank_adjustments must be a list of rule objects, "
+                f"got {raw_rules!r}"
+            )
         return cls(
             weights=Weights(
                 skills=_num(w.get("skills"), 0.6),
@@ -1080,6 +1300,7 @@ class ScoringPolicy:
                 experience_below=_num(r.get("experience_below"), 70),
                 missing_skills_shown=_num(r.get("missing_skills_shown"), 3),
             ),
+            rank_adjustments=rules,
         )
 
 
