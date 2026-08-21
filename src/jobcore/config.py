@@ -251,6 +251,22 @@ class Loaded:
         return self.policy.candidate
 
     @property
+    def scoring_hash(self) -> str:
+        """The ARITHMETIC half of :attr:`policy_hash`, hashed on its own.
+
+        Derived rather than stored, so it cannot drift from the policy it
+        describes and so no ``Loaded(...)`` construction site has to remember
+        it. This is the field a config readout shares with a scored result:
+        a result's ``scoring_hash`` equalling this one means the result was
+        produced by the arithmetic currently on disk.
+
+        It is deliberately NOT equal to :attr:`policy_hash`, which also covers
+        ``candidate``. Both are printed by :meth:`report` for exactly that
+        reason. See :meth:`jobcore.policy.Policy.fingerprint`.
+        """
+        return self.policy.scoring_hash
+
+    @property
     def config_status(self) -> str:
         if self.config_error:
             return f"error: {self.config_error}"
@@ -265,11 +281,20 @@ class Loaded:
         return self.policy.server(name)
 
     def report(self, server: Optional[str] = None) -> dict:
-        """The payload a ``<server>_config()`` tool returns."""
+        """The payload a ``<server>_config()`` tool returns.
+
+        Prints BOTH fingerprints. ``policy_hash`` covers scoring and candidate
+        and is what the agent's approval gate compares; ``scoring_hash``
+        covers the arithmetic alone and is what every scored result is stamped
+        with. Two fields, because they answer two questions — and printing
+        only the first is what made "is this stored score current?"
+        unanswerable. See :meth:`jobcore.policy.Policy.fingerprint`.
+        """
         out = {
             "revision": self.revision,
             "policy_rev": self.policy_rev,
             "policy_hash": self.policy_hash,
+            "scoring_hash": self.scoring_hash,
             "source": self.source,
             "config_status": self.config_status,
             "candidate": self.policy.candidate.to_dict(),

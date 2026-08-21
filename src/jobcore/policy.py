@@ -53,8 +53,15 @@ inflating ``candidate.skills`` until every job scores 100, and collapsing
 ``scoring.weights`` onto whichever component a job maxes out. Neither can be
 put in Tier C (they are the operator's headline feature). They are bounded
 instead, by :data:`HARD_LIMITS` and by the fingerprint rule: a cycle that
-observes a scoring fingerprint it has not seen before must run in approval
-mode regardless of configured mode. See :func:`requires_approval_cycle`.
+observes a POLICY fingerprint it has not seen before must run in approval mode
+regardless of configured mode. See :func:`requires_approval_cycle`.
+
+The fingerprint that rule reads is :attr:`Policy.policy_hash`, which covers
+scoring AND candidate. It is NOT :attr:`Policy.scoring_hash`, which covers the
+arithmetic alone and is what a scored RESULT is stamped with. The two are
+different questions and were briefly the same field name; the difference is
+spelled out at :meth:`Policy.fingerprint` and guarded by
+``tests/test_stamp_identity.py``.
 """
 
 from __future__ import annotations
@@ -1104,7 +1111,14 @@ _DEFAULT_RANK_ADJUSTMENTS: tuple[RankRule, ...] = (
 
 @dataclass(frozen=True)
 class ScoringPolicy:
-    """Everything that can move a number. This is what gets fingerprinted."""
+    """Everything that can move a number: the ARITHMETIC, and nothing else.
+
+    This half fingerprints as :attr:`scoring_hash`. The distinction from
+    :attr:`Policy.policy_hash` is load-bearing and is documented at
+    :meth:`Policy.fingerprint`; the short version is that this one answers
+    "was the same arithmetic applied?" and the other answers "was the same
+    policy in effect?", which are different questions about the same file.
+    """
 
     weights: Weights = field(default_factory=Weights)
     bonuses: Bonuses = field(default_factory=Bonuses)
@@ -1214,6 +1228,28 @@ class ScoringPolicy:
             },
             "rank_adjustments": [r.to_dict() for r in self.rank_adjustments],
         }
+
+    # ── stamping ───────────────────────────────────────────────────────────
+
+    def fingerprint(self) -> dict:
+        """The arithmetic, and only the arithmetic.
+
+        Wrapped in a ``{"scoring": ...}`` envelope rather than hashed bare, so
+        that the two fingerprints in this module are the same SHAPE and one
+        can never accidentally collide with the other's payload.
+        """
+        return {"scoring": self.to_dict()}
+
+    @property
+    def scoring_hash(self) -> str:
+        """Short hash of the arithmetic. See :meth:`Policy.fingerprint`.
+
+        This is the single implementation. :attr:`Policy.scoring_hash` and
+        :attr:`jobcore.fit.FitScore.scoring_hash` both delegate here rather
+        than rebuilding the payload, because two hand-written copies of a
+        fingerprint is precisely how the last ambiguity got in.
+        """
+        return fingerprint_hash(self.fingerprint())
 
     @classmethod
     def from_dict(cls, data: Mapping | None) -> "ScoringPolicy":
@@ -1542,12 +1578,43 @@ class Policy:
     # ── stamping ───────────────────────────────────────────────────────────
 
     def fingerprint(self) -> dict:
-        """Exactly the inputs that can move a number.
+        """Exactly the inputs that can move a number: arithmetic AND candidate.
 
         Name, headline, titles, notice period and every display cap are
         excluded, so the hash does not churn on a change that cannot affect a
-        score. Two results with the same fingerprint hash are directly
-        comparable; two with different hashes are not, and now you can tell.
+        score.
+
+        TWO HASHES, TWO QUESTIONS -- read this before comparing any stamp.
+        The system prints two 12-hex fingerprints and they are NOT
+        interchangeable. They were briefly both called ``policy_hash``, which
+        made a stamp comparison silently wrong in both directions; the names
+        below are now the contract, and ``tests/test_stamp_identity.py`` is
+        the guard.
+
+          :attr:`scoring_hash` -- covers ``scoring`` only. "Was the same
+              ARITHMETIC applied?"  This is what goes on a RESULT. A result
+              already carries its own inputs; what it cannot otherwise say is
+              which weights, bonuses, caps and verdict bands turned those
+              inputs into that number. It is deliberately blind to the
+              candidate, because ``FitScore`` receives ``profile_skills`` as a
+              call argument and on uplers and instahyre those come from the
+              LIVE platform profile rather than from this file -- a
+              candidate-covering stamp on such a result would be asserting
+              something the result cannot vouch for.
+
+          :attr:`policy_hash` -- covers ``scoring`` AND ``candidate``, i.e.
+              this method. "Was the same POLICY in effect?"  This is what goes
+              on a CONFIG readout, into the ledger, and into
+              :func:`requires_approval_cycle`, whose whole purpose is to catch
+              an inflated ``candidate.skills`` -- a change that moves no
+              arithmetic at all and that a scoring-only hash is right to
+              ignore and would therefore miss.
+
+        A config readout prints BOTH. That is what lets a stored score be
+        matched back to the configuration that produced it: the result's
+        ``scoring_hash`` against the readout's ``scoring_hash``. Before the
+        split there was no such bridge, and the shared name was standing in
+        for one.
         """
         return {
             "scoring": self.scoring.to_dict(),
@@ -1562,7 +1629,18 @@ class Policy:
 
     @property
     def policy_hash(self) -> str:
+        """Short hash of scoring AND candidate. See :meth:`fingerprint`."""
         return fingerprint_hash(self.fingerprint())
+
+    @property
+    def scoring_hash(self) -> str:
+        """Short hash of the arithmetic alone. See :meth:`fingerprint`.
+
+        Equal to the ``scoring_hash`` stamped on every result scored under
+        this policy -- that equality is the bridge, and it is pinned by
+        ``tests/test_stamp_identity.py``.
+        """
+        return self.scoring.scoring_hash
 
 
 def _merge_defaults(base: dict, override: Mapping) -> dict:
@@ -1591,12 +1669,21 @@ def fingerprint_hash(fingerprint: Mapping) -> str:
 def requires_approval_cycle(current_hash: str, last_seen_hash: Optional[str]) -> bool:
     """Must the next agent cycle run in approval mode regardless of its mode?
 
-    Yes whenever the scoring fingerprint changed since the last cycle. This is
+    Yes whenever the POLICY fingerprint changed since the last cycle. This is
     the guard against the two Tier-A levers that reach the apply selector
     without touching the agent block — inflating ``candidate.skills`` and
     reshaping ``scoring`` — neither of which can be Tier C because they are
     the operator's headline feature. One condition, and "policy was quietly
     widened" becomes "he sees the list".
+
+    FEED THIS :attr:`Policy.policy_hash`, NEVER :attr:`Policy.scoring_hash`.
+    Both are 12 hex characters and both compare cleanly, so passing the wrong
+    one fails silently and open: ``candidate.skills`` moves no arithmetic, so
+    a scoring-only hash does not change, so the widened cycle runs in auto and
+    he never sees the list. That is the exact hole this function exists to
+    close. Until 2026-08-21 both hashes were called ``policy_hash`` and this
+    docstring called the full one "the scoring fingerprint" — the naming was
+    inverted at both ends. See :meth:`Policy.fingerprint`.
     """
     if last_seen_hash is None:
         return True

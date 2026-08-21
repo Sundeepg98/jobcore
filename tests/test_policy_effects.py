@@ -355,32 +355,47 @@ class TestLocationAcceptsMoreThanOneCity:
 
 
 class TestStampingAndExplain:
+    """The result stamp is ``scoring_hash``, never ``policy_hash``.
+
+    The key was renamed 2026-08-21: a result can vouch for the arithmetic that
+    produced it and not for the candidate half of the policy, which on two of
+    the three servers comes from the live platform profile rather than the
+    config file. ``policy_hash`` now means one thing and lives only on a
+    config readout. See ``tests/test_stamp_identity.py``.
+    """
+
     def test_a_default_policy_result_is_byte_for_byte_unstamped(self):
         """179 golden parity cases depend on this exact shape."""
         out = compute_fit_score(**JOB)
-        assert "policy_hash" not in out
+        assert "scoring_hash" not in out
         assert "explain" not in out
+
+    def test_a_result_never_carries_the_config_tools_field_name(self):
+        """The rename, pinned: no result may print ``policy_hash``."""
+        assert "policy_hash" not in compute_fit_score(**JOB, stamp=True)
+        assert "policy_hash" not in compute_fit_score(
+            **JOB, policy=EIGHTY_TWENTY, explain=True)["explain"]
 
     def test_a_non_default_policy_stamps_itself_automatically(self):
         out = compute_fit_score(**JOB, policy=EIGHTY_TWENTY)
-        assert len(out["policy_hash"]) == 12
+        assert len(out["scoring_hash"]) == 12
 
     def test_the_stamp_can_be_forced_or_suppressed(self):
-        assert "policy_hash" in compute_fit_score(**JOB, stamp=True)
-        assert "policy_hash" not in compute_fit_score(**JOB, policy=EIGHTY_TWENTY,
-                                                      stamp=False)
+        assert "scoring_hash" in compute_fit_score(**JOB, stamp=True)
+        assert "scoring_hash" not in compute_fit_score(**JOB, policy=EIGHTY_TWENTY,
+                                                       stamp=False)
 
     def test_two_results_under_the_same_policy_carry_the_same_stamp(self):
         a = compute_fit_score(**JOB, policy=EIGHTY_TWENTY, stamp=True)
         b = compute_fit_score(job_skills={"go"}, profile_skills={"go"},
                               job_exp_str="1-3 years", profile_exp="2 years",
                               policy=EIGHTY_TWENTY, stamp=True)
-        assert a["policy_hash"] == b["policy_hash"], "these ARE comparable"
+        assert a["scoring_hash"] == b["scoring_hash"], "these ARE comparable"
 
     def test_two_results_under_different_policies_do_not(self):
         a = compute_fit_score(**JOB, policy=EIGHTY_TWENTY, stamp=True)
         b = compute_fit_score(**JOB, stamp=True)
-        assert a["policy_hash"] != b["policy_hash"], "these are NOT comparable"
+        assert a["scoring_hash"] != b["scoring_hash"], "these are NOT comparable"
 
     def test_policy_rev_rides_alongside_when_the_caller_has_one(self):
         out = compute_fit_score(**JOB, stamp=True, policy_rev=7)

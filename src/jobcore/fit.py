@@ -347,15 +347,27 @@ class FitScore:
     # ── Explainability ──────────────────────────────────────────────────────
 
     @property
-    def policy_hash(self) -> str:
-        """Short hash of the scoring inputs that produced this number.
+    def scoring_hash(self) -> str:
+        """Short hash of the ARITHMETIC that produced this number.
 
-        Two results with the same hash are directly comparable. Two with
+        Two results with the same hash were scored by the same weights,
+        bonuses, caps and verdict bands, and are directly comparable. Two with
         different hashes are not — and now you can tell, which is strictly
         more than scores carry today.
+
+        NOT ``policy_hash``, and the distinction is not cosmetic. This hash
+        covers ``scoring`` only; :attr:`jobcore.policy.Policy.policy_hash`
+        covers ``scoring`` AND ``candidate``, and the two produce different
+        values for the same file. Both were called ``policy_hash`` until
+        2026-08-21, so comparing a stored score's stamp against a config
+        readout's reported a difference that did not exist. The bridge is now
+        explicit: a config readout prints ``scoring_hash`` beside its
+        ``policy_hash``, and THAT is the field this one compares against.
+
+        Delegates to the one implementation on ``ScoringPolicy`` — a second
+        hand-written copy of the payload is how the ambiguity got in.
         """
-        from .policy import fingerprint_hash
-        return fingerprint_hash({"scoring": self.policy.to_dict()})
+        return self.policy.scoring_hash
 
     def explain(self) -> dict:
         """The arithmetic actually used — not the score, the working."""
@@ -387,7 +399,7 @@ class FitScore:
             "skill_weighting": (
                 "flat" if not self.policy.skills.weights else "weighted"
             ),
-            "policy_hash": self.policy_hash,
+            "scoring_hash": self.scoring_hash,
         }
 
     def to_dict(self, *, explain: bool = False,
@@ -400,13 +412,19 @@ class FitScore:
 
         Args:
             explain: add the ``explain`` block — the arithmetic, not the score.
-            stamp: add ``policy_hash`` (and ``policy_rev`` when supplied).
+            stamp: add ``scoring_hash`` (and ``policy_rev`` when supplied).
                 ``None`` means *auto*: stamp exactly when the policy is not the
                 shipped default, so a default-policy result stays byte-for-byte
                 what it is today and the 179 golden parity cases still pass.
             policy_rev: the loader's content-derived revision, when the caller
                 has one. The file's own ``revision`` integer is a
                 compare-and-swap token and is deliberately not this number.
+
+        The stamp key is ``scoring_hash``, NOT ``policy_hash``. A result can
+        only vouch for the arithmetic; the candidate half of the policy is a
+        call argument here and on two of the three servers it comes from the
+        live platform profile, not from the config file. See
+        :attr:`scoring_hash` and :meth:`jobcore.policy.Policy.fingerprint`.
         """
         result = {
             "overall_score": self.overall_score,
@@ -436,7 +454,7 @@ class FitScore:
         if stamp is None:
             stamp = self.policy != DEFAULT_SCORING_POLICY
         if stamp:
-            result["policy_hash"] = self.policy_hash
+            result["scoring_hash"] = self.scoring_hash
             if policy_rev is not None:
                 result["policy_rev"] = policy_rev
         if explain:
