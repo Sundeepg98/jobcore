@@ -64,7 +64,9 @@ fit.overall_score                        # 80
 | `BonusScore` | additive +5 location, +5 remote, +5 salary fit, +5 agent-eligible |
 | `FitScore` | the aggregate: 60% skills + 40% experience + bonuses, capped at 100 |
 | `Salary` / `SalaryConfig` | parsing, unit detection, market position, CTC comparison |
-| `ScoringEngine` | binds a taxonomy + salary type and gives you the lot |
+| `ScoringEngine` | binds a taxonomy + salary type + policy and gives you the lot |
+| `ScoringPolicy` / `Policy` | the numbers above as **values**, with defaults equal to the literals they replaced |
+| `jobcore.config` | the file loader — discovery, content-addressed reload, tiered writes. **Never on the scoring path.** |
 
 ## Configuration, not imports
 
@@ -85,6 +87,112 @@ from jobcore import DEFAULT_TAXONOMY
 
 mine = DEFAULT_TAXONOMY.extended({"cobol": {"cobol85", "ibm cobol"}})
 ```
+
+## Policy: the numbers are values, not literals
+
+The weights, bonuses, penalties and verdict bands were constants welded into
+`fit.py`, `salary.py` and `scoring.py`. They are now a `ScoringPolicy`, and it
+is **injected** — never read from a file by this package.
+
+```python
+from jobcore import ScoringEngine, ScoringPolicy, Weights
+
+engine = ScoringEngine(policy=ScoringPolicy(weights=Weights(0.75, 0.25)))
+engine.compute_fit_score(..., explain=True)["explain"]
+# {"weights": {...}, "base": {...}, "bonuses": {...}, "verdict_band": {...}}
+```
+
+**Every default equals the literal it replaced**, so a caller that passes
+nothing gets today's number, byte for byte — which is what lets the 179 golden
+parity cases pass untouched.
+
+`policy=` is a parameter of `FitScore.compute`, of `SkillMatch`,
+`ExperienceScore` and `BonusScore`, and of the flat module functions — not only
+of `ScoringEngine`. That is deliberate: three of naukri's four scoring call
+sites build `FitScore` directly and never touch an engine, and one consumer
+(instahyre) imports the flat `compute_fit_score` and never builds one either.
+An engine-only seam would have produced a split-brain in which the daily brief
+honoured his weights and the agent's own scorer did not.
+
+A result stamps itself with a `policy_hash` whenever the policy is not the
+shipped default — so two scores are comparable exactly when their hashes match,
+and you can tell.
+
+## Reading the file: `jobcore.config`
+
+A separate module, imported by the *server*, never by the scoring path:
+
+```python
+from jobcore import ScoringEngine
+from jobcore import config
+
+loaded = config.current(start=__file__)       # pass YOUR path, not jobcore's
+engine = ScoringEngine(policy=loaded.scoring, candidate=loaded.candidate)
+```
+
+`python -m jobcore.config` prints where the file was found — or every path it
+tried when it was not — plus the stamp and anything it refused.
+
+Four decisions worth knowing before changing it:
+
+- **Reload triggers on content, not mtime.** Measured on the target NTFS
+  volume, 12 back-to-back atomic replaces produced 8 distinct
+  `(mtime_ns, size)` pairs, and the common edits (`0.6`→`0.8`, `15`→`25`)
+  preserve byte length. The file is read and hashed every call; parsed only on
+  change.
+- **A hand edit is detected, not prevented.** A text editor takes no lock and
+  honours no compare-and-swap. The loader compares the observed fingerprint
+  against the ledger tail, writes a history row for anything new, and reports
+  a `revision` that went backwards as a `revision_regression`.
+- **`policy_rev` is content-derived.** The file's `revision` integer is the
+  compare-and-swap token; what gets stamped is a number the loader maintains.
+- **`locate(start)` takes the CALLER's path.** jobcore cannot know who
+  imported it, and walking up from its own `__file__` works under an editable
+  install and silently finds nothing under a normal one.
+
+No file anywhere → built-in defaults → today's behaviour. That is the
+independence guarantee, and `test_independence.py` enforces it.
+
+## The invariant, and the three trust tiers
+
+> **No sequence of config writes, from any server, may grant autonomous apply
+> authority.**
+
+Every key carries its tier as data (`jobcore.policy.SCHEMA`), and the tier is
+derived from what the key **gates in the call graph**, never from what it is
+called.
+
+| Tier | Rule |
+|---|---|
+| **A** | free. Changes what he *sees*; reversible, visible, no outward effect. |
+| **B** | one-way ratchet. Tightening is free; loosening needs an explicit `confirm_widen` **and** must land under a ceiling that lives in Python. The file can never raise the ceiling. |
+| **C** | **not loadable from the file at all.** The file may display the value; a differing one is refused loudly and the Python value is used. A write is refused by name. |
+
+Tier C holds `agent.enabled`, `agent.mode`, `min_fit_score` (wherever it
+appears — it is the autonomous-apply *selector*, not a display filter),
+`agent.searches`, `blocklist.enabled`, and **anything else under an `agent`
+subtree that the schema does not explicitly name** — deny by default, because
+the escalation the tier table exists to stop opened through two keys that had
+no tier at all.
+
+`false → true` and `dry_run → auto` have no "tighter" direction, so they cannot
+be ratchets. Env plus a restart is the right friction, for the same reason it
+is right for a kill switch: the party asking to widen the guard is the agent
+whose behaviour it bounds.
+
+Two levers reach the same selector without touching the agent block —
+inflating `candidate.skills` until every job scores 100, and collapsing
+`scoring.weights` onto whichever component a job maxes out. Neither can be
+Tier C (they are the point of the feature). They are bounded instead, by
+`HARD_LIMITS` and by `requires_approval_cycle`: any cycle that observes a
+scoring fingerprint it has not seen runs in approval mode regardless of the
+configured mode.
+
+`test_safety_invariant.py` does not assert that the guards exist — it runs the
+attack. Both traced paths, all six writes, plus a hand-edited file carrying the
+whole escalation. Every guarded assertion has a **control** that runs the same
+attack against a permissive build and asserts it *succeeds*; without that, a
+refusal could be a typo rather than a guard.
 
 ## Two kinds of variant, and only one of them is a table
 
@@ -152,7 +260,7 @@ job 0 on the salary bonus.
 pytest
 ```
 
-269 tests, ~2s, no network.
+554 tests, ~2s, no network.
 
 - **`test_parity_golden.py`** — `golden_scores.json` holds 179 inputs plus the
   full 88/150 alias table, captured by running Naukri's **pristine** scoring
@@ -170,6 +278,21 @@ pytest
   interpreter and scores a job in it.
 - **`test_engine.py`** — the behaviour that is new: injected units, injected
   taxonomy, and the loud-failure guarantees above.
+- **`test_policy.py`** — every default is asserted to equal today's literal, and
+  the schema's declared default is compared against the dataclass's so the two
+  can never drift apart silently.
+- **`test_policy_effects.py`** — a knob that is read and ignored is the decoy
+  class this design exists to kill, so every knob is asserted to move a score
+  by the arithmetically predicted amount. It also pins the property the golden
+  corpus structurally cannot see: **under a non-default policy, every entry
+  point returns the same number** — engine, flat API, and a direct
+  `FitScore.compute`, which is how three of naukri's four call sites score.
+- **`test_config.py`** — discovery, the content-hash reload (with the mtime
+  collision forced deterministically via `os.utime`, because it is real and
+  intermittent in the wild), deep merge against the planted `dict.update`
+  partial-reset bug, compare-and-swap, the PID+liveness lock, and hand-edit
+  detection.
+- **`test_safety_invariant.py`** — see below.
 
 Every one of these has been shown failing, which is the only reason to trust
 them when they are green: a mutated weighting and a single removed alias both
