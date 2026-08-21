@@ -466,10 +466,29 @@ class TestCompareAndSwap:
 
 
 class TestTheLock:
-    def test_a_live_holder_is_refused_by_pid(self, cfg):
+    def test_a_live_holder_is_refused_by_pid(self, cfg, monkeypatch):
+        """A different, LIVE pid must be refused rather than trampled.
+
+        The liveness probe is monkeypatched rather than pointed at a real
+        foreign pid, because there is no portable "definitely alive and
+        definitely not me" number. PID 1 looks like one and is not: it is init
+        on Linux (alive, so the lock is correctly refused) and the System Idle
+        Process on Windows (reported dead, so the lock is reclaimed). This test
+        previously wrote 1 and then asserted the lock could be TAKEN, which is
+        why it passed on the operator's box and failed on every Linux runner.
+        """
         lock_file = cfg.with_suffix(cfg.suffix + ".lock")
-        lock_file.write_text(f"{os.getpid() if False else 1}\n", encoding="utf-8")
-        # Write OUR pid via a held lock instead, then try from a "different" pid.
+        lock_file.write_text("424242\n", encoding="utf-8")
+        monkeypatch.setattr(C, "_pid_is_alive", lambda pid: True)
+
+        with pytest.raises(C.ConfigLockedError, match="424242"):
+            C._ConfigLock(lock_file, attempts=2, delay=0.0).acquire()
+        assert lock_file.read_text(encoding="utf-8").strip() == "424242", (
+            "a refused acquire must leave the holder's lock untouched"
+        )
+
+    def test_our_own_lock_is_acquired_and_released_cleanly(self, cfg):
+        lock_file = cfg.with_suffix(cfg.suffix + ".lock")
         held = C._ConfigLock(lock_file)
         held.acquire()
         try:
