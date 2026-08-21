@@ -1106,6 +1106,14 @@ def apply_patch(
         "revision": merged["revision"],
         "policy_rev": rev,
         "policy_hash": new_hash,
+        # The arithmetic half, beside the full one, so the caller can tell at a
+        # glance which KIND of change they just made. A patch that touches only
+        # `candidate` moves `policy_hash` and leaves this one alone -- meaning
+        # every score already on disk stays comparable with every score made
+        # from here on. A patch that touches `scoring` moves both, and nothing
+        # stored under the old hash is comparable any more. Same two questions
+        # as everywhere else; see `Policy.fingerprint`.
+        "scoring_hash": after_policy.scoring_hash,
         "changed": _changed(flatten(fresh, schema_aware=True),
                             flatten(merged, schema_aware=True)),
         "scoring_changed": diff,

@@ -225,6 +225,81 @@ class TestChangedPolicyChangedStamp:
         assert after["scoring_hash"] == before["scoring_hash"]
 
 
+class TestTheWriteResultSaysWhichKindOfChangeItWas:
+    """``apply_patch`` returns both hashes, and the pair is the useful signal.
+
+    A patch that touches only ``candidate`` moves ``policy_hash`` and leaves
+    ``scoring_hash`` alone -- which means every score already on disk stays
+    comparable with every score made from here on. A patch that touches
+    ``scoring`` moves both, and nothing stored under the old hash is comparable
+    any more. One field could not say that; two can.
+    """
+
+    def _write(self, tmp_path, monkeypatch, payload, confirm_widen=False):
+        from jobcore import config as C
+
+        path = tmp_path / "config" / "jobhunt.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('{"config_version": 1, "revision": 0}', encoding="utf-8")
+        monkeypatch.setenv(C.ENV_CONFIG, str(path))
+        C.invalidate_cache()
+        out = C.apply_patch(payload, path=path, actor="test",
+                            confirm_widen=confirm_widen)
+        assert out["status"] == "ok", out
+        return out
+
+    def test_both_hashes_are_returned(self, tmp_path, monkeypatch):
+        out = self._write(tmp_path, monkeypatch,
+                          {"candidate": {"years_experience": 6}})
+        assert len(out["policy_hash"]) == 12
+        assert len(out["scoring_hash"]) == 12
+
+    def test_a_candidate_only_write_leaves_the_scoring_hash_alone(
+            self, tmp_path, monkeypatch):
+        """Scores written before this patch stay comparable with scores after.
+
+        The patch used here is deliberately the WORST case: inflating
+        ``candidate.skills``, the Tier-A lever the approval gate exists to
+        catch. It needs ``confirm_widen`` to land at all (the tier-B ratchet
+        refuses it otherwise, which is a separate guard doing its own job).
+        Once it lands, ``policy_hash`` moves and ``scoring_hash`` does not --
+        which is the whole reason the approval gate must read the former. A
+        gate wired to the latter would sleep through exactly this write.
+        """
+        from jobcore.policy import DEFAULT_POLICY
+
+        out = self._write(tmp_path, monkeypatch,
+                          {"candidate": {"skills": ["go", "rust", "node.js"]}},
+                          confirm_widen=True)
+        assert out["policy_hash"] != DEFAULT_POLICY.policy_hash
+        assert out["scoring_hash"] == DEFAULT_POLICY.scoring_hash
+
+    def test_a_scoring_write_moves_both(self, tmp_path, monkeypatch):
+        """CONTROL. Without this the assertion above could be a constant."""
+        from jobcore.policy import DEFAULT_POLICY
+
+        out = self._write(
+            tmp_path, monkeypatch,
+            {"scoring": {"weights": {"skills": 0.75, "experience": 0.25}}})
+        assert out["policy_hash"] != DEFAULT_POLICY.policy_hash
+        assert out["scoring_hash"] != DEFAULT_POLICY.scoring_hash
+
+    def test_the_written_scoring_hash_is_what_the_next_score_will_carry(
+            self, tmp_path, monkeypatch):
+        """The write result is usable as a forward reference, not just a label."""
+        from jobcore import config as C
+
+        out = self._write(
+            tmp_path, monkeypatch,
+            {"scoring": {"weights": {"skills": 0.75, "experience": 0.25}}})
+        scored = FitScore.compute(
+            job_skills={"node.js"}, profile_skills={"node.js"},
+            job_exp_str="3-5 years", profile_exp="4 years",
+            policy=C.current().policy.scoring,
+        ).to_dict(stamp=True)
+        assert scored["scoring_hash"] == out["scoring_hash"]
+
+
 class TestDefaultsAreUntouched:
     """Shipped behaviour, byte for byte, when no config file exists."""
 
