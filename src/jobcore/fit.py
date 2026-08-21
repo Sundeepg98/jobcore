@@ -10,14 +10,33 @@ Extracted verbatim from ``naukri_server/domain/fit_score.py`` at commit 0021d82;
 that module is now a re-export shim over this one. The arithmetic is unchanged
 on purpose — a scoring change and an extraction must never ride together, or
 neither can be verified.
+
+2026-08-21: the numbers became POLICY rather than literals. ``policy=`` is a
+parameter of every ``compute`` here and a field on the frozen aggregate — not
+only a constructor argument on :class:`~jobcore.scoring.ScoringEngine`. That
+matters: three of naukri's four scoring call sites build ``FitScore`` directly
+and never touch an engine, so an engine-only seam would have produced a
+split-brain in which ``naukri_daily_brief`` honoured his weights and
+``naukri_auto_hunt`` — the agent's own scorer — did not. Every parameter
+defaults to :data:`~jobcore.policy.DEFAULT_SCORING_POLICY`, whose values are
+exactly the literals this file used to carry, so every existing call site
+keeps compiling and keeps its numbers.
 """
 
 from __future__ import annotations
 
 import math
 import re
-from dataclasses import dataclass
+from collections.abc import Sequence
+from dataclasses import dataclass, field
 from typing import Optional
+
+from .policy import (
+    DEFAULT_SCORING_POLICY,
+    ExperiencePolicy,
+    ScoringPolicy,
+    SkillsPolicy,
+)
 
 
 # ── Skill Match ────────────────────────────────────────────────────────────
@@ -31,18 +50,39 @@ class SkillMatch:
     matched: frozenset
     missing: frozenset
     job_skills: frozenset
+    policy: SkillsPolicy = field(default=DEFAULT_SCORING_POLICY.skills)
 
     @classmethod
-    def compute(cls, job_skills: set, profile_skills: set) -> "SkillMatch":
+    def compute(cls, job_skills: set, profile_skills: set,
+                policy: Optional[SkillsPolicy] = None) -> "SkillMatch":
         matched = frozenset(job_skills & profile_skills)
         missing = frozenset(job_skills - profile_skills)
-        return cls(matched=matched, missing=missing, job_skills=frozenset(job_skills))
+        return cls(matched=matched, missing=missing, job_skills=frozenset(job_skills),
+                   policy=policy or DEFAULT_SCORING_POLICY.skills)
 
     @property
     def score(self) -> float:
+        """Coverage of the job's skills, weighted when weights are configured.
+
+        With no configured weights every skill weighs 1.0 and this reduces to
+        ``len(matched) / len(job_skills) * 100`` — today's arithmetic exactly.
+
+        Read the weighted form before using it: it is
+        ``sum(w[matched]) / sum(w[job])``, so down-weighting a skill he does
+        NOT have shrinks the denominator only and RAISES the score of jobs
+        asking for it. Weights demote a stack by lowering the weight of the
+        skills he HAS in it; they are not a rank tilt and do not behave like
+        one. ``test_policy_effects.py`` pins both directions.
+        """
         if not self.job_skills:
-            return 50.0
-        return len(self.matched) / len(self.job_skills) * 100
+            return float(self.policy.unknown_job_skills_default)
+        if not self.policy.weights:
+            return len(self.matched) / len(self.job_skills) * 100
+        denominator = sum(self.policy.weight_of(s) for s in self.job_skills)
+        if denominator <= 0:
+            return float(self.policy.unknown_job_skills_default)
+        numerator = sum(self.policy.weight_of(s) for s in self.matched)
+        return numerator / denominator * 100
 
 
 # ── Experience Score ───────────────────────────────────────────────────────
@@ -66,6 +106,7 @@ class ExperienceScore:
         profile_exp,
         experience_min: Optional[int] = None,
         experience_max: Optional[int] = None,
+        policy: Optional[ExperiencePolicy] = None,
     ) -> "ExperienceScore":
         """Compute experience score from job requirements and profile experience.
 
@@ -74,8 +115,10 @@ class ExperienceScore:
             profile_exp: Profile experience (string like "5 years 0 months" or numeric)
             experience_min: Numeric min experience (avoids regex round-trip)
             experience_max: Numeric max experience (avoids regex round-trip)
+            policy: penalty shape. Defaults reproduce the shipped 20/15/60/50.
         """
-        exp_score = 50.0  # Default if can't determine
+        pol = policy or DEFAULT_SCORING_POLICY.experience
+        exp_score = float(pol.unknown_default)  # Default if can't determine
         p_exp = 0.0
         min_exp = max_exp = None
 
@@ -104,9 +147,15 @@ class ExperienceScore:
                 if min_exp <= p_exp <= max_exp:
                     exp_score = 100
                 elif p_exp < min_exp:
-                    exp_score = max(0, 100 - (min_exp - p_exp) * 20)
+                    exp_score = max(
+                        0,
+                        100 - (min_exp - p_exp) * pol.under_penalty_per_year,
+                    )
                 else:
-                    exp_score = max(60, 100 - math.sqrt(max(0, p_exp - max_exp)) * 15)
+                    exp_score = max(
+                        pol.over_floor,
+                        100 - math.sqrt(max(0, p_exp - max_exp)) * pol.over_coefficient,
+                    )
 
         return cls(
             score=exp_score,
@@ -145,17 +194,19 @@ class BonusScore:
         score_location_fn,
         score_work_mode_fn,
         score_salary_fn,
+        policy: Optional[ScoringPolicy] = None,
     ) -> "BonusScore":
         """Compute all bonus scores using provided scoring functions.
 
         Scoring functions are injected so the aggregate stays free of any
         opinion about salary units or geography.
         """
+        pol = policy or DEFAULT_SCORING_POLICY
         return cls(
             location=score_location_fn(job_location, profile_location),
             work_mode=score_work_mode_fn(job_work_mode),
             salary=score_salary_fn(job_salary, profile_expected_ctc),
-            agent_eligible=5 if is_agent_eligible else 0,
+            agent_eligible=pol.bonuses.agent_eligible if is_agent_eligible else 0,
         )
 
 
@@ -175,31 +226,37 @@ class FitScore:
     _profile_exp: object  # raw profile_exp value
     _job_exp_str: str  # raw job_exp_str value
     _has_enrichment: bool  # whether bonus breakdown should appear
+    #: The numbers that produced this result. Carried on the aggregate so a
+    #: score can be explained after the fact and so two results can be told
+    #: apart when they are not comparable.
+    policy: ScoringPolicy = field(default=DEFAULT_SCORING_POLICY)
+
+    @property
+    def bonus_total(self) -> int:
+        """Bonus points actually added, after the configured bonus cap."""
+        return min(self.policy.bonuses.cap, self.bonuses.total)
 
     @property
     def overall_score(self) -> int:
-        base_score = self.skill_match.score * 0.6 + self.experience.score * 0.4
-        return min(100, round(base_score + self.bonuses.total))
+        w = self.policy.weights
+        base_score = (
+            self.skill_match.score * w.skills + self.experience.score * w.experience
+        )
+        return min(100, round(base_score + self.bonus_total))
 
     @property
     def recommendation(self) -> str:
-        score = self.overall_score
-        if score >= 80:
-            return "Strong match — apply confidently"
-        if score >= 60:
-            return "Good match — worth applying"
-        if score >= 40:
-            return "Partial match — review missing skills before applying"
-        return "Weak match — consider upskilling first"
+        return self.policy.verdict_for(self.overall_score).label
 
     @property
     def reasons(self) -> list:
         reasons = []
-        if self.skill_match.score < 50:
-            missing_sample = sorted(self.skill_match.missing)[:3]
+        r = self.policy.reasons
+        if self.skill_match.score < r.skill_gap_below:
+            missing_sample = sorted(self.skill_match.missing)[:r.missing_skills_shown]
             reasons.append(f"Skill gap: missing {', '.join(missing_sample)}")
         if (
-            self.experience.score < 70
+            self.experience.score < r.experience_below
             and self.experience.min_required is not None
             and self.experience.max_required is not None
         ):
@@ -236,15 +293,24 @@ class FitScore:
         score_location_fn=None,
         score_work_mode_fn=None,
         score_salary_fn=None,
+        policy: Optional[ScoringPolicy] = None,
     ) -> "FitScore":
         """Factory method mirroring compute_fit_score() signature.
 
         score_location_fn, score_work_mode_fn, score_salary_fn are injected by
         the caller (see :mod:`jobcore.scoring`); omitting one scores it 0.
+
+        *policy* defaults to the shipped one, so a call site that has not been
+        migrated keeps today's numbers exactly. Pass the same policy you pass
+        to the bonus functions — a mismatch is the split-brain this parameter
+        exists to prevent, and ``ScoringEngine.fit_score`` binds both from one
+        object so a caller cannot get it wrong.
         """
-        skill = SkillMatch.compute(job_skills, profile_skills)
+        pol = policy or DEFAULT_SCORING_POLICY
+        skill = SkillMatch.compute(job_skills, profile_skills, policy=pol.skills)
         exp = ExperienceScore.compute(
             job_exp_str, profile_exp, experience_min, experience_max,
+            policy=pol.experience,
         )
 
         # Default no-op scoring functions when none provided
@@ -258,6 +324,7 @@ class FitScore:
             job_salary, profile_expected_ctc,
             is_agent_eligible,
             _loc_fn, _wm_fn, _sal_fn,
+            policy=pol,
         )
 
         has_enrichment = (
@@ -274,13 +341,72 @@ class FitScore:
             _profile_exp=profile_exp,
             _job_exp_str=job_exp_str,
             _has_enrichment=has_enrichment,
+            policy=pol,
         )
 
-    def to_dict(self) -> dict:
+    # ── Explainability ──────────────────────────────────────────────────────
+
+    @property
+    def policy_hash(self) -> str:
+        """Short hash of the scoring inputs that produced this number.
+
+        Two results with the same hash are directly comparable. Two with
+        different hashes are not — and now you can tell, which is strictly
+        more than scores carry today.
+        """
+        from .policy import fingerprint_hash
+        return fingerprint_hash({"scoring": self.policy.to_dict()})
+
+    def explain(self) -> dict:
+        """The arithmetic actually used — not the score, the working."""
+        w = self.policy.weights
+        skills_component = self.skill_match.score
+        exp_component = self.experience.score
+        combined = skills_component * w.skills + exp_component * w.experience
+        band = self.policy.verdict_for(self.overall_score)
+        return {
+            "weights": {"skills": w.skills, "experience": w.experience},
+            "base": {
+                "skills": round(skills_component, 1),
+                "experience": round(exp_component, 1),
+                "combined": round(combined, 1),
+            },
+            "bonuses": {
+                "location": self.bonuses.location,
+                "work_mode": self.bonuses.work_mode,
+                "salary": self.bonuses.salary,
+                "agent_eligible": self.bonuses.agent_eligible,
+                "raw_total": self.bonuses.total,
+                "cap": self.policy.bonuses.cap,
+                "total": self.bonus_total,
+            },
+            "bonus_cap_applied": self.bonuses.total > self.policy.bonuses.cap,
+            "score_ceiling_applied": round(combined + self.bonus_total) > 100,
+            "overall_score": self.overall_score,
+            "verdict_band": {"min": band.min, "label": band.label},
+            "skill_weighting": (
+                "flat" if not self.policy.skills.weights else "weighted"
+            ),
+            "policy_hash": self.policy_hash,
+        }
+
+    def to_dict(self, *, explain: bool = False,
+                stamp: Optional[bool] = None,
+                policy_rev: Optional[int] = None) -> dict:
         """Produce the flat dict shape the MCP tools return.
 
         Keys: overall_score, skill_match, experience_match, recommendation,
               reasons, and conditionally bonuses.
+
+        Args:
+            explain: add the ``explain`` block — the arithmetic, not the score.
+            stamp: add ``policy_hash`` (and ``policy_rev`` when supplied).
+                ``None`` means *auto*: stamp exactly when the policy is not the
+                shipped default, so a default-policy result stays byte-for-byte
+                what it is today and the 179 golden parity cases still pass.
+            policy_rev: the loader's content-derived revision, when the caller
+                has one. The file's own ``revision`` integer is a
+                compare-and-swap token and is deliberately not this number.
         """
         result = {
             "overall_score": self.overall_score,
@@ -306,5 +432,14 @@ class FitScore:
                 "agent_eligible": self.bonuses.agent_eligible,
                 "total": self.bonuses.total,
             }
+
+        if stamp is None:
+            stamp = self.policy != DEFAULT_SCORING_POLICY
+        if stamp:
+            result["policy_hash"] = self.policy_hash
+            if policy_rev is not None:
+                result["policy_rev"] = policy_rev
+        if explain:
+            result["explain"] = self.explain()
 
         return result

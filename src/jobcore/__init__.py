@@ -26,9 +26,45 @@ Different salary units::
 
     engine = ScoringEngine(salary_config=SalaryConfig(lakhs_multiplier=100_000))
     engine.compute_fit_score(...)
+
+Configurable policy — the weights, bonuses and bands are values, not literals::
+
+    from jobcore import ScoringEngine, ScoringPolicy, Weights
+    from jobcore import config                      # the loader; NOT imported here
+
+    loaded = config.current(start=__file__)         # reads the file, or defaults
+    engine = ScoringEngine(policy=loaded.scoring, candidate=loaded.candidate)
+
+``jobcore.config`` is deliberately NOT imported by this package: the scoring
+path must never read a file, or the same job scores differently on two
+machines and this stops being a library. Import it yourself, from the server.
 """
 
 from .fit import BonusScore, ExperienceScore, FitScore, SkillMatch
+from .policy import (
+    DEFAULT_CANDIDATE,
+    DEFAULT_POLICY,
+    DEFAULT_SCORING_POLICY,
+    HARD_LIMITS,
+    SCHEMA,
+    Bonuses,
+    CandidatePay,
+    CandidatePolicy,
+    ExperiencePolicy,
+    KeySpec,
+    PayBand,
+    Policy,
+    PolicyError,
+    ReasonsPolicy,
+    SalaryPolicy,
+    ScoringPolicy,
+    SkillsPolicy,
+    Verdict,
+    Weights,
+    requires_approval_cycle,
+    spec_for,
+    tier_for,
+)
 from .salary import DEFAULT_SALARY_CONFIG, Salary, SalaryConfig
 from .scoring import (
     DEFAULT_ENGINE,
@@ -42,7 +78,7 @@ from .scoring import (
 )
 from .skills import DEFAULT_TAXONOMY, SKILL_ALIASES, SkillTaxonomy
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 __all__ = [
     "__version__",
@@ -59,6 +95,29 @@ __all__ = [
     "ExperienceScore",
     "BonusScore",
     "FitScore",
+    # policy
+    "Policy",
+    "ScoringPolicy",
+    "CandidatePolicy",
+    "CandidatePay",
+    "PayBand",
+    "Weights",
+    "Bonuses",
+    "ExperiencePolicy",
+    "SkillsPolicy",
+    "SalaryPolicy",
+    "ReasonsPolicy",
+    "Verdict",
+    "KeySpec",
+    "SCHEMA",
+    "HARD_LIMITS",
+    "PolicyError",
+    "DEFAULT_POLICY",
+    "DEFAULT_SCORING_POLICY",
+    "DEFAULT_CANDIDATE",
+    "spec_for",
+    "tier_for",
+    "requires_approval_cycle",
     # scoring
     "ScoringEngine",
     "DEFAULT_ENGINE",

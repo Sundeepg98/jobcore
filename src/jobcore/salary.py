@@ -13,7 +13,9 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import ClassVar
+from typing import ClassVar, Optional
+
+from .policy import DEFAULT_SCORING_POLICY, ScoringPolicy
 
 
 @dataclass(frozen=True)
@@ -35,8 +37,10 @@ class SalaryConfig:
 
 DEFAULT_SALARY_CONFIG = SalaryConfig()
 
-# Scoring policy. These are judgement calls, not unit conventions, and they are
-# the same on every board — so they stay constants rather than becoming config.
+# Scoring policy. These ARE judgement calls — which is why they moved into
+# :mod:`jobcore.policy` and are injected per call. The module constants stay as
+# the documented defaults and as the values ``DEFAULT_SCORING_POLICY`` carries;
+# they are what every unmigrated caller still gets.
 _MEETS_EXPECTATION_RATIO = 0.8   # within 20% of expected CTC still scores
 _BELOW_MARKET_RATIO = 0.85
 _ABOVE_MARKET_RATIO = 1.15
@@ -102,33 +106,51 @@ class Salary:
             return (self.min_lakhs + self.max_lakhs) / 2
         return None
 
-    def compare_to_ctc(self, expected_ctc) -> int:
-        """Score salary fit against expected CTC. Returns 0, 3, or 5.
+    def compare_to_ctc(self, expected_ctc,
+                       policy: Optional[ScoringPolicy] = None) -> int:
+        """Score salary fit against expected CTC. Returns 0, 3, or 5 by default.
 
         5 = meets expectation, 3 = within 20%, 0 = below threshold.
+
+        ``expected_ctc`` MUST be denominated the same way this Salary type is.
+        That is why ``candidate.pay`` in the config schema is split per unit
+        system rather than carrying one scalar and a tag: a 24-lakh figure
+        compared against a $150,000 job clears everything, and a $20,959
+        figure compared against a 25-lakh job clears nothing — and both look
+        exactly like "no salary data", which is the failure this class's
+        ``is_disclosed`` contract exists to make impossible.
+
+        The sanity ceiling defaults to this type's ``raw_amount_threshold``,
+        which is what the code has always done — uplers deliberately binds
+        that to 10,000,000 for USD/year, so a concrete default in the policy
+        would silently re-impose a 200-lakh ceiling on a dollar board.
         """
+        pol = policy or DEFAULT_SCORING_POLICY
         # Defensive: ensure float (callers may pass string like "25")
         try:
             expected_ctc = float(expected_ctc)
         except (ValueError, TypeError):
             return 0
-        if self.max_lakhs is None or self.max_lakhs > self.CONFIG.raw_amount_threshold:
+        ceiling = pol.salary.ceiling_for(self.CONFIG.raw_amount_threshold)
+        if self.max_lakhs is None or self.max_lakhs > ceiling:
             return 0
         if self.max_lakhs >= expected_ctc:
-            return 5
-        if self.max_lakhs >= expected_ctc * _MEETS_EXPECTATION_RATIO:
-            return 3
+            return pol.bonuses.salary_meets
+        if self.max_lakhs >= expected_ctc * pol.salary.meets_expectation_ratio:
+            return pol.bonuses.salary_near
         return 0
 
-    def market_position(self, market_avg: float) -> str:
+    def market_position(self, market_avg: float,
+                        policy: Optional[ScoringPolicy] = None) -> str:
         """Categorize as below/at/above market.
 
         Returns ``"unknown"`` — never a guess — when the salary is undisclosed.
         """
+        pol = policy or DEFAULT_SCORING_POLICY
         if self.midpoint is None:
             return "unknown"
-        if self.midpoint < market_avg * _BELOW_MARKET_RATIO:
+        if self.midpoint < market_avg * pol.salary.below_market_ratio:
             return "below"
-        if self.midpoint > market_avg * _ABOVE_MARKET_RATIO:
+        if self.midpoint > market_avg * pol.salary.above_market_ratio:
             return "above"
         return "at_market"
