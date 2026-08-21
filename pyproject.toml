@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "jobcore"
-version = "0.1.0"
+version = "0.2.0"
 description = "Platform-agnostic job/profile scoring engine: skill taxonomy, fit score, salary normalisation."
 readme = "README.md"
 requires-python = ">=3.10"
