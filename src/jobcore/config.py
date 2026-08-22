@@ -86,6 +86,7 @@ __all__ = [
     "CONFIG_FILENAME",
     "LEDGER_FILENAME",
     "ROOT_MARKER",
+    "ENVELOPE_KEYS",
     "Location",
     "Loaded",
     "ConfigLockedError",
@@ -115,6 +116,24 @@ CONFIG_FILENAME = "jobhunt.json"
 LEDGER_FILENAME = "policy_history.jsonl"
 ROOT_MARKER = ".jobhunt-root"
 MAX_WALK_UP = 6
+
+#: The four keys jobcore stamps on a file ITSELF -- file metadata, not knobs.
+#: ``default_document()`` emits all four and ``apply_patch`` re-stamps three on
+#: every write, so counting them as "keys nothing reads" made that warning fire
+#: on every correctly generated file: uplers printed "config declares 4 key(s)
+#: nothing reads" on every tool call that bound a policy. A check that fires on
+#: the happy path is worse than no check, because it buries the one signal that
+#: means "you typed a knob that does not exist".
+#:
+#: READ-SIDE EXEMPTION ONLY, and deliberately narrow. These stay undeclared in
+#: the schema, so :func:`apply_patch`'s decoy guard still refuses a caller who
+#: tries to WRITE one -- the stamps are the writer's to set, and a patched
+#: ``revision`` would fight the compare-and-swap token. Matching is against the
+#: full dotted path, so the exemption is anchored at the top level and
+#: ``scoring.updated_by`` remains an unknown key.
+ENVELOPE_KEYS = frozenset({
+    "config_version", "revision", "updated_at", "updated_by",
+})
 
 #: Sections a patch may name. ``servers.<name>`` is scoped to that server.
 SHARED_SECTIONS = ("candidate", "scoring")
@@ -431,7 +450,8 @@ def _parse(raw: bytes, digest: str, loc: Location) -> Loaded:
             logger.error("jobcore.config: %s", line)
         data = _strip_paths(data, refused_paths)
 
-    unknown = tuple(sorted(k for k in leaves if spec_for(k) is None))
+    unknown = tuple(sorted(k for k in leaves
+                           if spec_for(k) is None and k not in ENVELOPE_KEYS))
     if unknown:
         logger.warning(
             "jobcore.config: %s declares keys nothing reads: %s",

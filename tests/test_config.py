@@ -392,6 +392,69 @@ class TestUndeclaredKeys:
         assert loaded.policy.servers["futureserver"]["some_setting"] == 1
 
 
+class TestTheEnvelopeIsNotAnUnknownKey:
+    """``config_version``/``revision``/``updated_at``/``updated_by`` are file
+    METADATA, not knobs -- and jobcore writes all four itself.
+
+    ``default_document()`` stamps them and ``apply_patch`` re-stamps three on
+    every write, so reporting them as "keys nothing reads" made the warning
+    fire on every correctly generated file. A permanent false positive is
+    worse than no check: it buried the one signal that means "you typed a knob
+    that does not exist" (uplers printed "config declares 4 key(s) nothing
+    reads" on every tool call that bound a policy). The control arm at the
+    bottom is what keeps this an exemption rather than a mute button.
+    """
+
+    def test_default_document_ROUND_TRIPS_with_no_unknown_keys(self, cfg):
+        """The generator's own output must not trip its own loader's alarm."""
+        cfg.write_text(json.dumps(C.default_document(), indent=2),
+                       encoding="utf-8")
+        C.invalidate_cache()
+        loaded = C.current()
+        assert loaded.unknown_keys == (), (
+            "default_document() emits keys the loader calls unread: %s"
+            % (loaded.unknown_keys,)
+        )
+
+    def test_a_file_jobcore_WROTE_reads_back_quiet(self, cfg):
+        """apply_patch stamps updated_at/updated_by; the read back must be quiet."""
+        out = C.apply_patch({"scoring": {"bonuses": {"hybrid": 4}}},
+                            path=cfg, actor="test")
+        assert out["status"] == "ok", out
+        C.invalidate_cache()
+        assert C.current().unknown_keys == ()
+
+    # -- control arm: the alarm must still fire ----------------------------
+
+    def test_a_genuinely_unknown_key_is_STILL_reported(self, cfg):
+        """The point is to stop crying wolf, not to stop the alarm."""
+        doc = C.default_document()
+        doc["invented_knob"] = 7
+        doc["scoring"]["another_decoy"] = "x"
+        cfg.write_text(json.dumps(doc, indent=2), encoding="utf-8")
+        C.invalidate_cache()
+        unknown = C.current().unknown_keys
+        assert "invented_knob" in unknown
+        assert "scoring.another_decoy" in unknown
+
+    def test_an_envelope_NAME_nested_elsewhere_is_still_unknown(self, cfg):
+        """Only the top-level envelope is exempt, never the name anywhere."""
+        doc = C.default_document()
+        doc["scoring"]["updated_by"] = "someone"
+        cfg.write_text(json.dumps(doc, indent=2), encoding="utf-8")
+        C.invalidate_cache()
+        assert "scoring.updated_by" in C.current().unknown_keys
+
+    def test_the_envelope_is_still_REFUSED_as_a_patch(self, cfg):
+        """Exempt from the read-side alarm is not writable from a tool.
+
+        The stamps are the writer's to set. A caller patching ``revision``
+        would fight the compare-and-swap token, so the decoy guard keeps them.
+        """
+        out = C.apply_patch({"revision": 99}, path=cfg, actor="test")
+        assert out["status"] == "refused"
+
+
 class TestValidationAtRead:
     def test_malformed_json_falls_back_to_defaults_and_says_so(self, cfg):
         cfg.write_text("{ this is not json", encoding="utf-8")
