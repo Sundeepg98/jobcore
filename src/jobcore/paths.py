@@ -5,7 +5,7 @@ results. That is wrong twice over: it publishes the machine's directory layout
 into any shared transcript or future public release, and it is paid for in
 tokens on every response that carries it.
 
-The obvious fix — delete the field — trades one defect for another. "Where is
+The obvious fix -- delete the field -- trades one defect for another. "Where is
 the config file even?" is a documented, real use of these tools, and a ``null``
 where a path used to be is the same "a field that answers a different question
 than it looks like" defect the rest of this sweep is closing. So paths are
@@ -14,16 +14,16 @@ RELATIVISED rather than removed: leak-free, and still an answer.
 Three forms, in order, and the third one exists because CI caught the second
 being insufficient:
 
-1. **Relative to an anchor** — the checkout root — so
+1. **Relative to an anchor** -- the checkout root -- so
    ``<root>/../../config/jobhunt.json`` reads ``../../config/jobhunt.json``.
-2. **Home-anchored** ``~/…`` for anything outside the checkout but under the
+2. **Home-anchored** ``~/...`` for anything outside the checkout but under the
    user's home.
 3. **The tail**, ``.../a/b/c``, for anything under neither.
 
 Form 3 was added on 2026-08-21 after a Linux CI runner failed a test that
 passed on every Windows box. The old last resort was the bare basename, which
 collapses every entry of a "paths I searched" list to the identical string
-``jobhunt.json`` — strictly worse than saying nothing. On Windows a temp dir
+``jobhunt.json`` -- strictly worse than saying nothing. On Windows a temp dir
 lives under the user's home, so form 2 always caught it and the fallback never
 fired locally; on the runner ``/tmp`` is under neither anchor, so every path
 fell through. The test was right and the function was wrong.
@@ -43,10 +43,15 @@ import os
 from pathlib import Path
 from typing import Any, Optional
 
-__all__ = ["DISPLAY_TAIL_PARTS", "MAX_PARENT_HOPS", "display_path"]
+__all__ = [
+    "DISPLAY_TAIL_PARTS",
+    "MAX_PARENT_HOPS",
+    "display_path",
+    "relativise_known",
+]
 
 #: Components kept by the tail form. Three is enough to tell two pytest tmp
-#: dirs apart — the case that exposed the old basename fallback — and short
+#: dirs apart -- the case that exposed the old basename fallback -- and short
 #: enough to publish no useful layout.
 DISPLAY_TAIL_PARTS = 3
 
@@ -63,7 +68,7 @@ def display_path(raw: Any, *, anchor: Any, home: Optional[Any] = None) -> Option
     Args:
         raw: the path to render. ``None`` and ``""`` pass straight through, so
             "no file was found" stays distinguishable from "a file at /".
-        anchor: the checkout root to measure against — the caller's repository,
+        anchor: the checkout root to measure against -- the caller's repository,
             not jobcore's. jobcore cannot know where its consumer lives, and a
             path relative to the *library* would be meaningless to the reader.
         home: override for the user's home directory. Tests pass it; callers
@@ -101,3 +106,42 @@ def display_path(raw: Any, *, anchor: Any, home: Optional[Any] = None) -> Option
     tail = parts[-DISPLAY_TAIL_PARTS:]
     prefix = ".../" if len(tail) < len(parts) else ""
     return prefix + "/".join(tail)
+
+
+def relativise_known(text: Any, *, known, render) -> Any:
+    """Replace each KNOWN absolute path found inside ``text`` with its rendering.
+
+    Renaming a field is not enough when the path was baked into prose. This
+    module's loader composes messages like ``f"{path} is not valid JSON: {exc}"``
+    and ``f"cannot read {path}: {exc}"``; those strings reach a caller through
+    ``config_error``, through ``config_status``, and -- found live on 2026-08-22
+    -- through the per-call notes that every scoring tool appends, so one
+    unparseable config file published the machine's layout from tools that
+    render no path of their own.
+
+    SUBSTITUTION IS EXACT, NEVER HEURISTIC. Only strings the caller already
+    KNOWS to be paths are replaced. A regex that hunted for path-shaped text in
+    arbitrary prose would eventually eat a Naukri API route, a URL, or a
+    Windows drive letter inside quoted user content -- which is how a scrubber
+    does more damage than the leak it was written for.
+
+    Args:
+        text: any value. Non-strings are returned untouched, so this is safe to
+            map over a whole payload.
+        known: the path strings this caller knows it may have emitted, e.g. a
+            config snapshot's ``source`` and every entry of ``searched``.
+        render: how to display one path, normally
+            ``lambda p: display_path(p, anchor=...)``.
+
+    Returns:
+        ``text`` with each known path substituted; the same object when nothing
+        matched.
+    """
+    if not isinstance(text, str) or not text:
+        return text
+    # Longest first: one searched path is often a prefix of another, and
+    # replacing the short one first would leave a mangled tail behind.
+    for raw in sorted({str(k) for k in known if k}, key=len, reverse=True):
+        if raw in text:
+            text = text.replace(raw, str(render(raw)))
+    return text

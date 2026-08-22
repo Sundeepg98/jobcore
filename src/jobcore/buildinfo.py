@@ -1,11 +1,11 @@
-"""What code is actually running — resolved once, at import, and then frozen.
+"""What code is actually running -- resolved once, at import, and then frozen.
 
 A fix committed to disk changes nothing for a process that is already up. On
 2026-08-21 that cost real time: a bug was diagnosed as a regression and an agent
 was dispatched to re-fix it, and the correction came back that the fix was
 already on disk and the *process* was stale. The same class recurred three more
 times that day. Every check available at the time was a behavioural fingerprint
-— does this field appear, is that count right — because there was no way to ask
+-- does this field appear, is that count right -- because there was no way to ask
 a server what code it holds.
 
 This module is that way. A server calls :func:`stamp` ONCE at import and puts
@@ -21,7 +21,7 @@ temporary repository *after* the first call and asserting the stamp still names
 the old commit.
 
 **Unknown is a value, never a guess.** No git executable, no work tree, a
-repository with no commits yet, a git that hangs — each returns
+repository with no commits yet, a git that hangs -- each returns
 ``source="unknown"`` with ``detail`` saying which, and ``commit=None``. A
 plausible-looking hash that nobody measured is the failure this module exists
 to prevent, so there is no fallback that invents one.
@@ -73,7 +73,7 @@ SHORT_HASH_LENGTH = 12
 class BuildStamp:
     """The commit a process was started from. Frozen: it describes the past.
 
-    ``resolved_at`` is not decoration — it is the field that makes the stamp
+    ``resolved_at`` is not decoration -- it is the field that makes the stamp
     falsifiable. A stamp whose ``resolved_at`` is hours old and whose ``commit``
     matches ``git rev-parse HEAD`` on disk means the running code IS current. A
     stamp whose ``commit`` differs from disk means the process is stale and no
@@ -101,7 +101,7 @@ class ProcessClock:
     Split from :class:`BuildStamp` because the two answer different questions
     and have different lifetimes: the stamp is frozen at import and never moves,
     while uptime is derived fresh on every call. Keeping uptime *out* of the
-    frozen stamp is deliberate — a cached uptime is a lie that grows.
+    frozen stamp is deliberate -- a cached uptime is a lie that grows.
 
     ``started_at`` is the moment this module recorded the server's import. For
     a stdio MCP server, whose whole module tree is imported at startup, that is
@@ -157,7 +157,7 @@ def _run_git(cwd: Path, *args: str) -> Optional[str]:
 
 
 def resolve(start: Any) -> BuildStamp:
-    """Read the working tree's git state NOW. Not memoised — see :func:`stamp`.
+    """Read the working tree's git state NOW. Not memoised -- see :func:`stamp`.
 
     Public because it is the honest counterpart in the staleness test: compare
     a held :func:`stamp` against a fresh :func:`resolve` and a stale process is
@@ -236,7 +236,7 @@ def stamp(start: Any) -> BuildStamp:
     reason this function exists rather than servers calling :func:`resolve`.
 
     Call it once, at module import, and hold the result in a module constant.
-    Calling it per request is harmless but pointless — the answer is frozen.
+    Calling it per request is harmless but pointless -- the answer is frozen.
     """
     try:
         key = str(Path(start).resolve())
@@ -282,8 +282,8 @@ def build_block(
 
     Combines the frozen commit stamp with live process timing, so a reader gets
     both halves of "what is running here" in one place: which code, and since
-    when. ``extra`` merges in whatever else the caller can pin — a second
-    repository's stamp, a config hash — without each server re-inventing the
+    when. ``extra`` merges in whatever else the caller can pin -- a second
+    repository's stamp, a config hash -- without each server re-inventing the
     key names.
     """
     block: dict = {"code": stamp(start).as_dict()}

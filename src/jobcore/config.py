@@ -299,15 +299,62 @@ class Loaded:
     def server(self, name: str) -> dict:
         return self.policy.server(name)
 
-    def report(self, server: Optional[str] = None) -> dict:
+    @property
+    def known_paths(self) -> tuple[str, ...]:
+        """Every absolute path string this snapshot could have put in a message.
+
+        Not a guess about what a message contains -- a list of what this object
+        actually holds, which is what makes
+        :func:`jobcore.paths.relativise_known` an exact substitution rather than
+        a heuristic hunt through prose.
+
+        The PARENT directories are included because the loader names files it
+        derives from the config's own directory -- the history ledger and the
+        write lock both appear inside error text (``could not append to
+        {ledger}``, ``config file locked by live PID ... (lock: {lock_file})``)
+        and neither equals ``source``. Substituting their shared directory
+        catches both without inventing a pattern for either.
+        """
+        out: list[str] = []
+        for raw in (self.source, *self.searched):
+            if not raw:
+                continue
+            out.append(str(raw))
+            parent = str(Path(raw).parent)
+            if parent and parent not in out:
+                out.append(parent)
+        return tuple(out)
+
+    def status_for(self, display) -> str:
+        """:attr:`config_status`, with every known path rendered by ``display``."""
+        from .paths import relativise_known
+
+        return relativise_known(
+            self.config_status, known=self.known_paths, render=display
+        )
+
+    def report(self, server: Optional[str] = None, display=None) -> dict:
         """The payload a ``<server>_config()`` tool returns.
 
         Prints BOTH fingerprints. ``policy_hash`` covers scoring and candidate
         and is what the agent's approval gate compares; ``scoring_hash``
         covers the arithmetic alone and is what every scored result is stamped
-        with. Two fields, because they answer two questions — and printing
+        with. Two fields, because they answer two questions -- and printing
         only the first is what made "is this stored score current?"
         unanswerable. See :meth:`jobcore.policy.Policy.fingerprint`.
+
+        ``display`` renders paths. Pass
+        ``lambda p: jobcore.paths.display_path(p, anchor=<your checkout>)`` and
+        the report carries no absolute local path, including inside the error
+        and status PROSE. Renaming the path FIELDS is not enough on its own:
+        the loader composes messages such as ``f"{path} is not valid JSON"``,
+        and on 2026-08-22 one unparseable config file was measured publishing
+        the machine's layout through ``config_status`` and through per-call
+        notes from tools that render no path of their own.
+
+        Omitting ``display`` keeps the raw absolute paths, because jobcore
+        cannot know the caller's checkout root and a library that guessed would
+        render a path relative to itself, which is meaningless to the reader.
         """
         out = {
             "revision": self.revision,
@@ -332,6 +379,14 @@ class Loaded:
         }
         if server is not None:
             out["server"] = self.policy.server(server)
+        if display is not None:
+            from .paths import relativise_known
+
+            known = self.known_paths
+            out["source"] = display(self.source) if self.source else self.source
+            out["searched"] = [display(s) for s in self.searched]
+            for key in ("config_status", "config_error", "ledger_error"):
+                out[key] = relativise_known(out[key], known=known, render=display)
         return out
 
 

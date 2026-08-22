@@ -2,7 +2,7 @@
 
 Two properties are in tension and both are asserted here: no result may carry a
 drive letter or an absolute root, and two different paths may not render as the
-same string. The second is what rules out the obvious fixes — deleting the
+same string. The second is what rules out the obvious fixes -- deleting the
 field, or reducing everything to its basename, which turns a list of searched
 paths into N copies of "jobhunt.json".
 """
@@ -17,8 +17,12 @@ import pytest
 from jobcore.paths import DISPLAY_TAIL_PARTS, display_path
 
 
-#: What the 2026-08-20 sweep actually saw in tool output.
-DRIVE_PATH = re.compile(r"[A-Za-z]:[\\/]")
+#: What the 2026-08-20 sweep actually saw in tool output. The lookbehind is
+#: load-bearing: a drive letter is ONE character, so the bare form matches the
+#: "s:/" inside "https://" and fires on every correct URL a server emits. Two
+#: sibling suites hit that today; tests/test_report_display.py pins the
+#: difference as a control so the loose literal is not copied into a third.
+DRIVE_PATH = re.compile(r"(?<![A-Za-z])[A-Za-z]:[\\/]")
 
 
 def _leaks(text) -> bool:
