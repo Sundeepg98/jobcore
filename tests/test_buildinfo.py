@@ -339,3 +339,66 @@ class TestBuildBlock:
         assert set(block) == {"code", "process", "config"}
         assert block["config"]["policy_hash"] == "abc"
         assert block["process"]["pid"] > 0
+
+
+# --------------------------------- installed, not checked out --------------
+
+
+class TestAPackageInstallHasNoWorkTree:
+    """CI found this: the stamp was correct and useless at the same time.
+
+    A consumer installs jobcore from a git URL into site-packages. That is not
+    a work tree, so "which commit" has no answer and `source` was `unknown` --
+    honest, and silent in exactly the deployment where nobody can run `git log`
+    to find out. `distribution` gives the same call a real second answer.
+    """
+
+    def test_a_non_repo_path_with_a_known_distribution_reports_its_version(
+        self, tmp_path
+    ):
+        plain = tmp_path / "site-packages-ish"
+        plain.mkdir()
+        s = buildinfo.resolve(plain, distribution="pytest")
+        assert s.source == "package"
+        assert s.commit is None, "there is no commit here and none may be invented"
+        assert s.version, "the installed version is the whole point of this branch"
+        assert "pytest" in s.detail
+
+    def test_without_a_distribution_the_same_path_is_unknown(self, tmp_path):
+        """CONTROL. The version does not appear by magic; it is asked for."""
+        plain = tmp_path / "site-packages-ish"
+        plain.mkdir()
+        s = buildinfo.resolve(plain)
+        assert s.source == "unknown"
+        assert s.version is None
+
+    def test_a_distribution_that_is_not_installed_stays_unknown(self, tmp_path):
+        plain = tmp_path / "site-packages-ish"
+        plain.mkdir()
+        s = buildinfo.resolve(plain, distribution="no-such-distribution-anywhere")
+        assert s.source == "unknown"
+        assert s.version is None
+
+    def test_git_still_wins_when_there_is_a_work_tree(self, tmp_path):
+        """A checkout answers "which commit", which is strictly more specific."""
+        repo = _init_repo(tmp_path)
+        full = _commit(repo, "one.txt", "1")
+        s = buildinfo.resolve(repo, distribution="pytest")
+        assert s.source == "git"
+        assert s.commit_full == full
+        assert s.version, "both facts are known here, so both are reported"
+
+    def test_the_memo_keys_on_the_distribution_too(self, tmp_path):
+        """Same path, two questions, two right answers -- so two cache slots."""
+        plain = tmp_path / "site-packages-ish"
+        plain.mkdir()
+        bare = buildinfo.stamp(plain)
+        named = buildinfo.stamp(plain, distribution="pytest")
+        assert bare.source == "unknown"
+        assert named.source == "package"
+
+    def test_self_stamp_answers_in_both_installations(self):
+        """Whatever this checkout is, jobcore can say what jobcore is."""
+        s = buildinfo.self_stamp()
+        assert s.source in ("git", "package"), s
+        assert s.commit or s.version, "one of the two identities must be present"
