@@ -212,3 +212,70 @@ class TestSubstitutionIsExactNotHeuristic:
         assert loose.search("https://www.naukri.com/x")
         assert not DRIVE_PATH.search("https://www.naukri.com/x")
         assert DRIVE_PATH.search(r"D:\Sundeep\projects")
+
+
+class TestTheExactDetectorIsOnlyExactForThisGeometry:
+    """The primary detector has a precondition, and it is not free.
+
+    Found by the instahyre slice after I told three slices to make
+    exact-substring matching primary. It is only EXACT if a CORRECT rendering
+    cannot contain the needle -- and against the real CI anchor on Linux it
+    can. A naive port would have false-positived on every green run.
+
+    The fixture above dodges it by GEOMETRY, not by luck: checkout at
+    ``<tmp>/mcp-servers/someserver`` with the config two levels up, which is
+    what production looks like, so the correct answer is the literal
+    ``../../config/jobhunt.json`` and shares no substring with the absolute
+    path. The geometry is part of the instrument, so it gets an assertion.
+    """
+
+    def test_the_correct_rendering_shares_no_substring_with_the_absolute_path(
+        self, broken_config
+    ):
+        checkout, cfg = broken_config
+        rendered = display_path(cfg, anchor=checkout)
+        assert rendered == "../../config/jobhunt.json"
+        assert str(cfg) not in rendered, (
+            "the fixture geometry has drifted: a correct rendering now contains "
+            "the needle, so _contains would fire on a green run"
+        )
+
+    def test_a_cross_root_geometry_makes_the_substring_detector_unsound(self):
+        """CONTROL. The case the geometry avoids, demonstrated rather than asserted.
+
+        Uses posixpath directly so it runs identically on every OS -- the
+        failure is POSIX-shaped and would otherwise be invisible from Windows,
+        which is the same blindness this whole file exists to close.
+        """
+        import posixpath
+
+        anchor = "/home/runner/work/repo/repo"
+        target = "/tmp/pytest-of-runner/pytest-0/x.json"
+        rendered = posixpath.relpath(target, anchor)
+
+        # Five hops: home/runner/work/repo/repo. Derived, not hand-counted --
+        # a wrong literal here would make the control pass for the wrong reason.
+        assert rendered == "../" * 5 + target.lstrip("/")
+        assert not DRIVE_PATH.search(rendered), "no drive letter: correctly rendered"
+        assert target in rendered, (
+            "a PERFECTLY CORRECT rendering contains the absolute path, so an "
+            "exact-substring detector fires on it. This is why the fixture "
+            "puts the checkout and the config under a shared root."
+        )
+
+    def test_tightening_the_regex_does_not_rescue_a_leading_drive_letter(self):
+        """A second thing I told a slice that was not the fix.
+
+        The lookbehind stops ``https://`` matching, and nothing else. Against a
+        string that BEGINS with a drive letter the lookbehind succeeds at
+        position 0, so both forms match. The uplers slice measured this: the
+        defect there was a Windows-shaped test fixture, and no regex change
+        could have fixed it.
+        """
+        leading = "Z:/opt/one/jobhunt.json"
+        loose = re.compile(r"[A-Za-z]:[\/]")
+        assert loose.search(leading)
+        assert DRIVE_PATH.search(leading), (
+            "the lookbehind is not a fix for a leading drive letter; it only "
+            "stops the s:/ inside https:// from matching"
+        )
