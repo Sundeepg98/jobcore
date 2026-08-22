@@ -38,6 +38,17 @@ Configurable policy — the weights, bonuses and bands are values, not literals:
 ``jobcore.config`` is deliberately NOT imported by this package: the scoring
 path must never read a file, or the same job scores differently on two
 machines and this stops being a library. Import it yourself, from the server.
+
+Three submodules follow that same rule and are imported the same way, from the
+server rather than from here, each for its own reason:
+
+* :mod:`jobcore.config` — reads a file (above).
+* :mod:`jobcore.buildinfo` — shells out to ``git`` to answer "what code is this
+  process actually running", which is a question about a deployment, not about
+  scoring. ``from jobcore import buildinfo``.
+* :mod:`jobcore.paths` — renders a filesystem path into a form that carries no
+  machine layout. Pure, but it is presentation, and the scoring path has no
+  presentation. ``from jobcore import paths``.
 """
 
 from .fit import BonusScore, ExperienceScore, FitScore, SkillMatch
