@@ -17,7 +17,10 @@ deleting the prose would trade the leak for an unusable error.
 from __future__ import annotations
 
 import json
+import os
 import re
+
+from pathlib import Path
 
 import pytest
 
@@ -279,3 +282,103 @@ class TestTheExactDetectorIsOnlyExactForThisGeometry:
             "the lookbehind is not a fix for a leading drive letter; it only "
             "stops the s:/ inside https:// from matching"
         )
+
+
+class TestAPathSpelledByReprIsTheSamePath:
+    """The needle has two spellings and the scrubber knew one.
+
+    Found live by the uplers slice, 2026-08-22. ``OSError.__str__`` renders its
+    filename through ``repr()``, so on Windows the path arrives in an error
+    message with DOUBLED separators. Every exact-substring detector in this
+    family -- including the one this file made primary an hour earlier -- looked
+    for the single-separator form, found nothing, and called the payload clean.
+
+    So there was a window in which nothing was looking: the drive-letter regex
+    is blind on Linux, and the exact detector was blind on the repr form.
+    """
+
+    @pytest.fixture
+    def unreadable_config(self, tmp_path, monkeypatch):
+        """A config file that EXISTS but cannot be read.
+
+        The OSError is constructed rather than provoked, because provoking a
+        real permission failure is not portable -- but it is constructed with
+        the real 3-argument form, so ``str()`` of it is byte-identical to what
+        a real failed open produces. Verified: both render the filename via
+        repr().
+        """
+        checkout = tmp_path / "mcp-servers" / "someserver"
+        checkout.mkdir(parents=True)
+        cfg_dir = tmp_path / "config"
+        cfg_dir.mkdir()
+        cfg = cfg_dir / "jobhunt.json"
+        cfg.write_text("{}", encoding="utf-8")
+
+        real = Path.read_bytes
+
+        def boom(self):
+            if self == cfg:
+                raise OSError(13, "Permission denied", str(cfg))
+            return real(self)
+
+        monkeypatch.setattr(Path, "read_bytes", boom)
+        monkeypatch.setenv(jobcore_config.ENV_CONFIG, str(cfg))
+        jobcore_config.invalidate_cache()
+        yield checkout, cfg
+        jobcore_config.invalidate_cache()
+
+    def test_the_repr_spelling_is_what_actually_appears(self, unreadable_config):
+        """Baseline. Pins WHY the single-spelling detector saw nothing."""
+        checkout, cfg = unreadable_config
+        raw = jobcore_config.current(start=checkout).report()
+        err = raw["config_error"] or ""
+        assert "cannot read" in err, err
+        if os.sep == "\\":
+            # BOTH spellings appear, one per half, which is the finding stated
+            # exactly: f"cannot read {path}: {exc}" writes {path} with single
+            # separators and {exc} -- an OSError, whose __str__ uses repr() --
+            # with doubled ones.
+            assert str(cfg) in err, (
+                "the {path} half of the message uses single separators"
+            )
+            assert str(cfg).replace("\\", "\\\\") in err, (
+                "the {exc} half uses repr() separators -- THIS is the half a "
+                "single-spelling detector could not see, which is how one "
+                "sentence ended up with two opposite verdicts"
+            )
+
+    def test_both_spellings_are_relativised(self, unreadable_config):
+        checkout, cfg = unreadable_config
+        out = jobcore_config.current(start=checkout).report(
+            display=lambda p: display_path(p, anchor=checkout)
+        )
+        err = out["config_error"] or ""
+        assert not _contains(err, str(cfg))
+        assert not _contains(err, str(cfg).replace("\\", "\\\\"))
+        assert not _leaky(err), err
+        assert "jobhunt.json" in err, "still has to say WHICH file"
+        assert "Permission denied" in err, "and still has to say why"
+
+    def test_the_single_spelling_still_works(self):
+        """The common case must not regress while fixing the rare one."""
+        out = relativise_known(
+            "cannot read /a/b/c.json: boom",
+            known=["/a/b/c.json"],
+            render=lambda p: "REL",
+        )
+        assert out == "cannot read REL: boom"
+
+    def test_spellings_collapse_to_one_on_posix(self):
+        """CONTROL. This adds nothing where separators are not escaped."""
+        from jobcore.paths import _spellings
+
+        assert _spellings("/a/b/c.json") == ["/a/b/c.json"]
+        # Derived, never hand-escaped: a wrong literal here would make this
+        # pass or fail for reasons unrelated to the behaviour it checks.
+        win = r"D:\a\b.json"
+        assert _spellings(win) == [win, win.replace("\\", "\\\\")]
+
+    def test_it_is_still_a_spelling_list_and_not_a_hunt(self):
+        """The exactness is the safety property, so it gets its own test."""
+        text = "GET /jobapi/v3/search failed via https://www.naukri.com/x"
+        assert relativise_known(text, known=[r"D:\some\path"], render=lambda p: "REL") == text
