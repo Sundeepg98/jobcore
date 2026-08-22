@@ -30,6 +30,20 @@ pytestmark = pytest.mark.skipif(
 # ---------------------------------------------------------------- helpers ---
 
 
+def _parse_git_time(raw: str):
+    """Parse git's ``%cI``, which is NOT what every supported Python accepts.
+
+    ``datetime.fromisoformat`` only learned the "Z" suffix in Python 3.11, and
+    this package declares ``requires-python >= 3.10``. git prints the
+    COMMITTER's offset, so the same command yields "+05:30" on a developer box
+    in IST and "Z" on a UTC CI runner -- which is exactly how a green local run
+    shipped a test that died on both runners at once.
+    """
+    from datetime import datetime
+
+    return datetime.fromisoformat(raw.replace("Z", "+00:00"))
+
+
 def _git(repo, *args):
     proc = subprocess.run(
         ["git", "-C", str(repo), *args], capture_output=True, text=True
@@ -183,12 +197,47 @@ class TestWhatItReports:
         assert s.dirty_files == 1
 
     def test_committed_at_is_iso8601(self, tmp_path):
-        from datetime import datetime
+        """Parseable, and TIMEZONE-AWARE, on every Python this package supports.
+
+        The Z suffix is the trap, and CI found it where no local run could.
+        git's %cI prints the committer's own offset, so on a developer box in
+        IST it reads "+05:30" while a UTC CI runner emits "Z" -- and
+        datetime.fromisoformat only learned to accept "Z" in Python 3.11, while
+        this package declares requires-python >= 3.10. So the value is real and
+        correct; it is the naive parse that was wrong, and it was wrong only on
+        the half of the matrix this box cannot run.
+        """
+        from datetime import timezone
 
         repo = _init_repo(tmp_path)
         _commit(repo, "one.txt", "1")
         s = buildinfo.stamp(repo)
-        assert datetime.fromisoformat(s.committed_at) is not None
+        parsed = _parse_git_time(s.committed_at)
+        assert parsed.tzinfo is not None, (
+            "a commit time with no offset cannot be compared across machines: %r"
+            % s.committed_at
+        )
+        assert parsed.astimezone(timezone.utc) is not None
+
+    def test_both_offset_forms_parse_on_every_supported_python(self):
+        """The CI failure itself, pinned so it cannot recur unobserved.
+
+        A developer box in IST only ever produces the "+05:30" form, so the "Z"
+        form -- the one that actually broke -- is unreachable from a local run
+        no matter how many times the test above is executed. Asserting on both
+        literals makes the regression detectable everywhere.
+        """
+        # Both literals are real: the first is what the CI runner emitted when
+        # this broke, the second is what this box emits for a local commit.
+        utc = _parse_git_time("2026-08-22T06:10:21Z")
+        ist = _parse_git_time("2026-08-22T12:21:32+05:30")
+        assert utc.utcoffset().total_seconds() == 0
+        assert ist.utcoffset().total_seconds() == 5.5 * 3600
+        # The same instant written two ways must compare equal, which is the
+        # property that makes two servers' stamps comparable at all.
+        assert _parse_git_time("2026-08-22T06:10:21Z") == _parse_git_time(
+            "2026-08-22T11:40:21+05:30"
+        )
 
     def test_a_file_start_path_resolves_via_its_directory(self, tmp_path):
         """Servers pass ``__file__``; that must work, not fall back to unknown."""

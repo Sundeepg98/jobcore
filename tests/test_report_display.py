@@ -32,12 +32,36 @@ DRIVE_PATH = re.compile(r"(?<![A-Za-z])[A-Za-z]:[\\/]")
 
 
 def _leaky(value) -> bool:
+    """Windows-shaped leak detection. NOT the primary assertion -- see below."""
     if isinstance(value, str):
         return bool(DRIVE_PATH.search(value))
     if isinstance(value, dict):
         return any(_leaky(k) or _leaky(v) for k, v in value.items())
     if isinstance(value, (list, tuple)):
         return any(_leaky(v) for v in value)
+    return False
+
+
+def _contains(value, needle: str) -> bool:
+    """Does the actual path string appear anywhere in this payload?
+
+    THIS is the primary detector, and :func:`_leaky` is only a second opinion.
+    CI caught why on 2026-08-22: a drive-letter regex can only fire on Windows,
+    so on the Linux half of the matrix every leak assertion here passed while
+    detecting nothing, and the CONTROL that was supposed to prove them
+    falsifiable failed outright -- correctly, because on a POSIX runner the
+    leaked path is ``/tmp/pytest-of-runner/...`` and carries no drive letter.
+
+    Checking for the exact path the fixture created is platform-independent and
+    strictly stronger: it fails on a real leak on either OS, and it cannot pass
+    by being unable to see.
+    """
+    if isinstance(value, str):
+        return needle in value
+    if isinstance(value, dict):
+        return any(_contains(k, needle) or _contains(v, needle) for k, v in value.items())
+    if isinstance(value, (list, tuple)):
+        return any(_contains(v, needle) for v in value)
     return False
 
 
@@ -75,7 +99,9 @@ class TestTheProseLeaksWithoutDisplay:
         raw = loaded.report()
         raw["source"] = None
         raw["searched"] = []
-        assert _leaky(raw), "the path survives in prose after both fields are cleared"
+        assert _contains(raw, str(cfg)), (
+            "the path survives in prose after both fields are cleared"
+        )
 
 
 class TestDisplayReachesTheProse:
@@ -84,6 +110,8 @@ class TestDisplayReachesTheProse:
         checkout, cfg = broken_config
         loaded = jobcore_config.current(start=checkout)
         out = loaded.report(display=lambda p: display_path(p, anchor=checkout))
+        assert not _contains(out, str(cfg)), out
+        assert not _contains(out, str(cfg.parent)), out
         assert not _leaky(out), out
 
     def test_the_error_still_says_which_file_and_why(self, broken_config):
@@ -99,6 +127,7 @@ class TestDisplayReachesTheProse:
         checkout, cfg = broken_config
         loaded = jobcore_config.current(start=checkout)
         status = loaded.status_for(lambda p: display_path(p, anchor=checkout))
+        assert not _contains(status, str(cfg))
         assert not _leaky(status)
         assert "jobhunt.json" in status
 
@@ -115,6 +144,7 @@ class TestDisplayReachesTheProse:
         out = loaded.report(display=lambda p: display_path(p, anchor=checkout))
         assert out["source"] == "../../config/jobhunt.json"
         assert out["searched"] == ["../../config/jobhunt.json"]
+        assert not _contains(out, str(cfg))
         assert not _leaky(out)
 
     def test_omitting_display_changes_nothing(self, broken_config):
@@ -143,6 +173,7 @@ class TestKnownPaths:
             known=loaded.known_paths,
             render=lambda p: display_path(p, anchor=checkout),
         )
+        assert not _contains(out, str(cfg.parent))
         assert not _leaky(out)
         assert "jobhunt.history.jsonl" in out
 
