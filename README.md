@@ -183,8 +183,58 @@ independence guarantee, and `test_independence.py` enforces it.
 
 ## The invariant, and the three trust tiers
 
-> **No sequence of config writes, from any server, may grant autonomous apply
-> authority.**
+> **No sequence of config writes may grant autonomous apply authority — except
+> where a server has explicitly named a key and shipped the Python bound that
+> replaces the refusal.**
+>
+> **As of 2026-08-25 exactly one server has done that: naukri.** For every other
+> server the invariant reads as it always did, unchanged and unweakened.
+
+### If you own uplers or instahyre, read this and then stop worrying
+
+`ac189b0` moved **six keys, all of them under `servers.naukri.agent`**, from
+tier C to tier B. Measured across the whole schema, old versus new: **104 keys
+before, 104 after, 6 changed, all `servers.naukri.*`. Zero shared keys. Zero
+uplers. Zero instahyre.**
+
+The leaf-name rule is also unchanged — `TIER_C_LEAF_NAMES` is still exactly
+`{"min_fit_score"}`, and every undeclared `servers.<other>.agent.*` key still
+resolves to tier C. Probed both versions side by side:
+
+```
+                                          OLD 6acc7e6   NEW ac189b0
+servers.uplers.agent.min_fit_score            C             C
+servers.uplers.agent.enabled                  C             C
+servers.instahyre.agent.min_fit_score         C             C
+servers.uplers.agent.something_new            C             C
+```
+
+**So the safety invariant did NOT weaken for a server whose operator never
+asked for it.** If it had, that would be a regression rather than a feature,
+and invisible to the agent that owns that server — which is why it is measured
+here rather than asserted.
+
+### What changed for you as a CONSUMER
+
+**`tier_c_refusals` no longer reports a naukri agent escalation**, because those
+keys are no longer tier C. Measured, planting the same five-write escalation in
+each namespace:
+
+| namespace planted | `tier_c_refusals` |
+|---|---|
+| `servers.naukri.agent.*` | **0** — now tier B, loaded and bounded in Python |
+| `servers.uplers.agent.*` | **4** — refused loudly, unchanged |
+| `servers.instahyre.agent.*` | **3** — refused loudly, unchanged |
+
+**If one of your tests plants a `servers.naukri.*` escalation and asserts it is
+refused, that test now fails — and it was never testing your invariant.** It was
+asserting a property of a sibling's namespace. Repoint the fixture at your own
+`servers.<you>.agent.*` and it passes, because your keys are still tier C.
+Verified: uplers' suite goes 2 failed / 91 passed, both failures are exactly
+that shape, and its real invariant — that the escalation does not move an uplers
+score — still passes untouched.
+
+Do not exclude the module. Repoint the fixture.
 
 Every key carries its tier as data (`jobcore.policy.SCHEMA`), and the tier is
 derived from what the key **gates in the call graph**, never from what it is
@@ -202,6 +252,20 @@ appears — it is the autonomous-apply *selector*, not a display filter),
 subtree that the schema does not explicitly name** — deny by default, because
 the escalation the tier table exists to stop opened through two keys that had
 no tier at all.
+
+**Except where a spec names the key.** Since `ac189b0` the six
+`servers.naukri.agent` keys above are declared tier B, and a declared spec beats
+the blanket rule. That is the only way out of tier C and it is deliberately
+narrow: one key, one spec, one server, one review. The deny-by-default for
+*undeclared* keys is untouched — omission is how the original escalation opened
+and omission still refuses.
+
+A server may follow naukri out of tier C only by doing what naukri did: name the
+key explicitly, and ship the Python bound that replaces the refusal. For naukri
+those bounds are `MIN_AGENT_FIT_FLOOR` clamping the selector from any source,
+the kill switch, and a daily quota that caps candidates before the act step.
+**Moving a key to tier B without that bound is not a config change, it is
+removing a guard.**
 
 `false → true` and `dry_run → auto` have no "tighter" direction, so they cannot
 be ratchets. Env plus a restart is the right friction, for the same reason it
