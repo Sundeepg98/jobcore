@@ -300,29 +300,40 @@ class TestTierBRatchet:
 
 
 class TestTierCIsNotLoadableAtAll:
+    """What is STILL tier C after the 2026-08-25 ruling.
+
+    Six named agent keys left this tier. The subtree did not, and the subtree
+    is what the escalation opened through, so it gets the same treatment the
+    six used to get: refused on write, refused on load, loudly.
+    """
+
     @pytest.mark.parametrize("patch,needle", [
-        ({"servers": {"naukri": {"agent": {"enabled": True}}}}, "agent.enabled"),
-        ({"servers": {"naukri": {"agent": {"mode": "auto"}}}}, "agent.mode"),
-        ({"servers": {"naukri": {"agent": {"min_fit_score": 0}}}}, "min_fit_score"),
-        ({"servers": {"naukri": {"agent": {"blocklist": {"enabled": False}}}}},
-         "blocklist.enabled"),
-        ({"servers": {"naukri": {"agent": {"searches": [{"q": "anything"}]}}}},
-         "searches"),
-        ({"servers": {"naukri": {"agent": {"per_search_limit": 500}}}},
-         "per_search_limit"),
+        ({"servers": {"naukri": {"agent": {"newly_invented_switch": True}}}},
+         "newly_invented_switch"),
+        ({"servers": {"naukri": {"agent": {"deeply": {"nested": {"thing": 1}}}}}},
+         "deeply.nested.thing"),
+        ({"servers": {"uplers": {"agent": {"enabled": True}}}}, "agent.enabled"),
+        ({"servers": {"uplers": {"min_fit_score": 0}}}, "min_fit_score"),
     ])
     def test_a_write_is_refused_by_name(self, cfg, patch, needle):
+        section = f"servers.{list(patch['servers'])[0]}"
         out = C.apply_patch(patch, path=cfg, actor="test",
-                            allowed_sections=("servers.naukri",))
+                            allowed_sections=(section,))
         assert out["status"] == "refused"
         joined = " ".join(out["refusals"])
         assert needle in joined and "tier C" in joined
 
     def test_confirm_widen_does_not_unlock_tier_c(self, cfg):
-        out = C.apply_patch({"servers": {"naukri": {"agent": {"mode": "auto"}}}},
-                            path=cfg, actor="test",
-                            allowed_sections=("servers.naukri",),
-                            confirm_widen=True)
+        """Tier C is not a ratchet with extra friction. There is no flag.
+
+        (The six that LEFT tier C are ratchets, and confirm_widen does unlock
+        those -- that is the difference between the tiers, and it is asserted
+        in TestTheSixAreLoadableNow below.)
+        """
+        out = C.apply_patch(
+            {"servers": {"naukri": {"agent": {"newly_invented_switch": True}}}},
+            path=cfg, actor="test", allowed_sections=("servers.naukri",),
+            confirm_widen=True)
         assert out["status"] == "refused"
 
     def test_a_HAND_EDITED_tier_c_value_is_refused_on_LOAD(self, cfg, caplog):
@@ -332,20 +343,21 @@ class TestTierCIsNotLoadableAtAll:
         the file is exactly the surface a text editor reaches.
         """
         write_config(cfg, servers={"naukri": {"agent": {
-            "enabled": True, "mode": "auto", "min_fit_score": 0,
-            "blocklist": {"enabled": False},
+            "newly_invented_switch": True,
+            "deeply": {"nested": {"thing": 1}},
         }}})
         loaded = C.current()
         agent = loaded.policy.server("naukri")["agent"]
-        assert agent["enabled"] is False
-        assert agent["mode"] == "dry_run"
-        assert agent["min_fit_score"] == 70
-        assert agent["blocklist"]["enabled"] is True
-        assert len(loaded.tier_c_refusals) == 4
+        assert "newly_invented_switch" not in agent
+        # `_strip_paths` removes the refused LEAF; the husk of its ancestors
+        # is left behind and nothing reads it. Assert the value is gone, which
+        # is the claim, rather than the husk, which is not.
+        assert agent.get("deeply", {}).get("nested", {}) == {}
+        assert len(loaded.tier_c_refusals) == 2
         assert all("REFUSED" in r for r in loaded.tier_c_refusals)
 
     def test_the_refusal_is_LOUD_not_silent(self, cfg, caplog):
-        write_config(cfg, servers={"naukri": {"agent": {"mode": "auto"}}})
+        write_config(cfg, servers={"naukri": {"agent": {"invented": True}}})
         with caplog.at_level("ERROR", logger="jobcore.config"):
             loaded = C.current()
         assert loaded.tier_c_refusals
@@ -353,11 +365,143 @@ class TestTierCIsNotLoadableAtAll:
                    for rec in caplog.records), caplog.text
 
     def test_a_tier_c_value_EQUAL_to_the_python_one_is_a_harmless_echo(self, cfg):
-        """The file may DISPLAY them for transparency. It may not decide them."""
+        """The file may DISPLAY a tier-C value for transparency.
+
+        `servers.uplers.min_fit_score` has no shipped default, so any value is
+        a real refusal; a key whose spec DOES carry one echoes harmlessly.
+        """
         write_config(cfg, servers={"naukri": {"agent": {
-            "enabled": False, "mode": "dry_run", "min_fit_score": 70}}})
+            "max_daily_applications": 15}}})
         loaded = C.current()
         assert loaded.tier_c_refusals == ()
+
+
+class TestTheSixAreLoadableNow:
+    """The 2026-08-25 ruling at the jobcore boundary.
+
+    jobcore's job here is small and worth stating exactly: it lets the six
+    THROUGH, as a ratchet. It does not bound what the agent then does -- the
+    four Python guards in naukri's `agent.py` do that, and this package cannot
+    see them. So these tests assert arrival and friction, nothing more.
+    """
+
+    SIX = {
+        "enabled": True,
+        "mode": "auto",
+        "min_fit_score": 0,
+        "searches": [{"name": "anything", "keywords": "anything"}],
+        "per_search_limit": 50,
+        "blocklist": {"enabled": False},
+    }
+
+    def test_a_HAND_EDITED_file_now_ARMS_the_agent(self, cfg):
+        """The exact assertion that used to say the opposite.
+
+        Kept in this shape deliberately: the escalation still lands here, and
+        the tests that prove it is neutralised live where the neutralising
+        code lives (naukri's `tests/test_safety_invariant.py`).
+        """
+        write_config(cfg, servers={"naukri": {"agent": dict(self.SIX)}})
+        loaded = C.current()
+        agent = loaded.policy.server("naukri")["agent"]
+
+        assert agent["enabled"] is True
+        assert agent["mode"] == "auto"
+        assert agent["min_fit_score"] == 0
+        assert agent["per_search_limit"] == 50
+        assert agent["blocklist"]["enabled"] is False
+        assert len(agent["searches"]) == 1
+        assert loaded.tier_c_refusals == (), loaded.tier_c_refusals
+
+    @pytest.mark.parametrize("patch,needle", [
+        ({"servers": {"naukri": {"agent": {"enabled": True}}}}, "enabled"),
+        ({"servers": {"naukri": {"agent": {"mode": "auto"}}}}, "mode"),
+        ({"servers": {"naukri": {"agent": {"min_fit_score": 0}}}},
+         "min_fit_score"),
+        ({"servers": {"naukri": {"agent": {"per_search_limit": 90}}}},
+         "per_search_limit"),
+        ({"servers": {"naukri": {"agent": {"blocklist": {"enabled": False}}}}},
+         "blocklist.enabled"),
+    ])
+    def test_loosening_one_still_needs_confirm_widen(self, cfg, patch, needle):
+        out = C.apply_patch(patch, path=cfg, actor="test",
+                            allowed_sections=("servers.naukri",))
+        assert out["status"] == "refused", out
+        joined = " ".join(out["refusals"])
+        assert needle in joined and "confirm_widen" in joined
+
+    @pytest.mark.parametrize("patch", [
+        {"servers": {"naukri": {"agent": {"enabled": True}}}},
+        {"servers": {"naukri": {"agent": {"mode": "auto"}}}},
+        {"servers": {"naukri": {"agent": {"min_fit_score": 0}}}},
+        {"servers": {"naukri": {"agent": {"per_search_limit": 90}}}},
+        {"servers": {"naukri": {"agent": {"blocklist": {"enabled": False}}}}},
+    ])
+    def test_confirm_widen_DOES_unlock_it(self, cfg, patch):
+        """CONTROL for the class above. Tier B refuses a step and then takes
+        it when asked properly; tier C never takes it. Without this, every
+        refusal above could be coming from a typo."""
+        out = C.apply_patch(patch, path=cfg, actor="test",
+                            allowed_sections=("servers.naukri",),
+                            confirm_widen=True)
+        assert out["status"] == "ok", out
+
+    def test_tightening_the_selector_is_free(self, cfg):
+        out = C.apply_patch(
+            {"servers": {"naukri": {"agent": {"min_fit_score": 85}}}},
+            path=cfg, actor="test", allowed_sections=("servers.naukri",))
+        assert out["status"] == "ok", out
+        assert C.current().policy.server("naukri")["agent"]["min_fit_score"] == 85
+
+    def test_adding_a_search_loosens_and_removing_one_is_free(self, cfg):
+        """`searches` is a list of DICTS, which is why `_is_loosening` had to
+        learn about unhashable elements -- see `_hashable_set`. Before that fix
+        this call raised TypeError out of apply_patch."""
+        two = [{"name": "a", "keywords": "a"}, {"name": "b", "keywords": "b"}]
+        seed = C.apply_patch(
+            {"servers": {"naukri": {"agent": {"searches": two}}}},
+            path=cfg, actor="test", allowed_sections=("servers.naukri",),
+            confirm_widen=True)
+        assert seed["status"] == "ok", seed
+
+        shrink = C.apply_patch(
+            {"servers": {"naukri": {"agent": {"searches": two[:1]}}}},
+            path=cfg, actor="test", allowed_sections=("servers.naukri",))
+        assert shrink["status"] == "ok", shrink
+
+        grow = C.apply_patch(
+            {"servers": {"naukri": {"agent": {"searches": two}}}},
+            path=cfg, actor="test", allowed_sections=("servers.naukri",))
+        assert grow["status"] == "refused", grow
+        assert "confirm_widen" in " ".join(grow["refusals"])
+
+    def test_the_python_ceilings_still_cannot_be_passed(self, cfg):
+        """confirm_widen is friction, not a master key."""
+        for patch, needle in (
+            ({"servers": {"naukri": {"agent": {"per_search_limit": 5000}}}},
+             "ceiling"),
+            ({"servers": {"naukri": {"agent": {"min_fit_score": 900}}}},
+             "ceiling"),
+            ({"servers": {"naukri": {"agent": {"mode": "yolo"}}}}, "not one of"),
+            ({"servers": {"naukri": {"agent": {
+                "searches": [{"name": str(i)} for i in range(25)]}}}},
+             "maximum"),
+        ):
+            out = C.apply_patch(patch, path=cfg, actor="test",
+                                allowed_sections=("servers.naukri",),
+                                confirm_widen=True)
+            assert out["status"] == "refused", (patch, out)
+            assert needle in " ".join(out["refusals"]), (patch, out)
+
+    def test_the_daily_quota_is_still_bounded_by_its_python_ceiling(self, cfg):
+        """It is one of the four Python guards, so it keeps its own ceiling
+        here as well as naukri's refusal to read it from this file."""
+        out = C.apply_patch(
+            {"servers": {"naukri": {"agent": {"max_daily_applications": 99}}}},
+            path=cfg, actor="test", allowed_sections=("servers.naukri",),
+            confirm_widen=True)
+        assert out["status"] == "refused", out
+        assert "ceiling 25" in " ".join(out["refusals"]), out
 
 
 class TestSectionScoping:
@@ -786,8 +930,14 @@ class TestDefaultDocument:
         again = json.loads(json.dumps(doc))
         assert P.Policy.from_dict(again).scoring == P.DEFAULT_SCORING_POLICY
 
-    def test_it_displays_the_tier_c_values_without_making_them_loadable(self):
+    def test_it_ships_the_agent_DISARMED_even_though_the_file_can_arm_it(self):
+        """The six became loadable on 2026-08-25; the shipped document did not
+        change. A generated config still says disabled/dry_run, so arming is
+        an edit somebody made, never a default somebody inherited."""
         doc = C.default_document()
         agent = doc["servers"]["naukri"]["agent"]
         assert agent["enabled"] is False and agent["mode"] == "dry_run"
-        assert P.tier_for("servers.naukri.agent.mode") == P.TIER_C
+        assert agent["min_fit_score"] == 70
+        assert agent["blocklist"]["enabled"] is True
+        assert list(agent["searches"]) == []
+        assert P.tier_for("servers.naukri.agent.mode") == P.TIER_B

@@ -1,30 +1,45 @@
-"""THE INVARIANT. Everything else in this package is subordinate to it.
+"""THE BOUNDARY, and where each half of it is proved.
 
-    No sequence of config writes, from any server, may grant autonomous
-    apply authority.
+    RETIRED 2026-08-25: *no sequence of config writes, from any server, may
+    grant autonomous apply authority.* The file CAN now arm naukri's agent.
 
-This file does not assert that the guards exist. It attempts the attack.
+The five-write escalation this file was built to refuse is REAL and is still
+run here -- what changed is the expected outcome. It now LANDS, deliberately,
+and is neutralised one layer down in Python. The operator overruled the
+conclusion; he did not overrule the protections, and the protections were
+never in this package.
 
-Two traced paths are reproduced here verbatim from the adversarial review:
+**WHY THIS FILE CANNOT PROVE THE OTHER HALF.** The four guards that bound a
+file-armed agent live in ``naukri_server/agent.py``: the MIN_AGENT_FIT_FLOOR
+clamp in ``_decide``, the kill switch inside the auto-apply loop, the daily cap
+on candidates, and ``validate_agent_config`` on the merged config. jobcore
+ships with ZERO runtime dependencies and ``test_independence.py`` runs it in a
+clean interpreter, so this suite cannot import naukri to exercise them --
+verified, not assumed: ``import naukri_server`` is a ModuleNotFoundError here.
 
-**Path 1 — five writes, no ceremony.** ``agent.enabled: true`` ->
-``agent.mode: "auto"`` -> ``min_fit_score: 0`` -> ``blocklist.enabled: false``
--> arbitrary ``searches[]``. Under the tier table as first designed every one
-of those is Tier A, and the result is real applications per day to arbitrary
-jobs at arbitrary companies on a live account, with no human in the loop. The
-ratchet held the *count* and lost the *meaning*.
+The proof is therefore split, each half asserted where its code lives:
 
-**Path 2 — one write, through a sibling.** ``candidate`` is writable from any
-server, so ``uplers_set_config({"candidate": {"skills": [<the whole
-taxonomy>]}})`` drives ``SkillMatch.score`` to 100 for every job in existence,
-which clears any threshold and drives naukri's agent. Section scoping bounds
-the caps; it does not bound the selector.
+  * HERE: the escalation lands, with tier-B friction (every loosening step
+    needs ``confirm_widen``), under Python ceilings the file cannot raise, and
+    with the deny-by-default subtree intact. Plus the one guard that IS a
+    jobcore constant, :data:`MIN_AGENT_FIT_FLOOR`, proved unwritable.
+  * ``naukri/tests/test_safety_invariant.py``: the same escalation planted in
+    a file, loaded through ``load_agent_config``, and then measured through
+    ``_decide`` and ``_effective_mode`` -- the floor clamping the selector, the
+    quota capping candidates, the overlay validated or dropped whole.
 
-**Every guarded assertion below has a CONTROL that runs the same attack against
-a permissive build and asserts it SUCCEEDS.** Without that, a refusal could be
-coming from a typo in a key name rather than from a guard, and the test would
-certify nothing. Six bugs in this codebase in one week were checks that could
-not fail.
+**Path 2 -- one write, through a sibling -- is UNCHANGED and still refused.**
+``candidate`` is writable from any server, so ``uplers_set_config({"candidate":
+{"skills": [<the whole taxonomy>]}})`` drives ``SkillMatch.score`` to 100 for
+every job in existence. That lever cannot be tier C (it is the feature he asked
+for by name), so it is bounded by HARD_LIMITS and by the forced approval cycle,
+and every assertion about it below is untouched by the ruling.
+
+**Every guarded assertion below has a CONTROL that shows it CAN fail** --
+against a permissive build, or as a refuse/accept pair for the ratcheted keys.
+Without that, a refusal could be coming from a typo in a key name rather than
+from a guard. Six bugs in this codebase in one week were checks that could not
+fail.
 """
 
 import json
@@ -97,7 +112,17 @@ def permissive(monkeypatch):
 # ── CONTROLS: prove the attack is real and the harness can land a write ────
 
 class TestTheAttackSucceedsAgainstAPermissiveBuild:
-    """If these ever fail, every refusal below is meaningless."""
+    """If these ever fail, every refusal below is meaningless.
+
+    NOTE after the 2026-08-25 ruling: the FIRST test here no longer
+    distinguishes the permissive build from the real one -- the escalation
+    lands against both, which is the ruling. It is kept because it still
+    proves the harness can land a write at all, which is the precondition for
+    reading anything into the refuse/accept pairs further down. The other
+    controls in this class are untouched by the ruling and still do the job
+    they were written for: they cover `candidate.skills` and `scoring`, which
+    were never tier C and are still bounded by HARD_LIMITS.
+    """
 
     def test_the_five_step_escalation_lands_completely(self, cfg, permissive):
         for label, patch in ESCALATION:
@@ -178,84 +203,192 @@ class TestTheAttackSucceedsAgainstAPermissiveBuild:
 
 # ── THE GUARD: the same attack against the real build ──────────────────────
 
-class TestNoWriteSequenceCanGrantApplyAuthority:
+class TestTheEscalationLandsHereAndIsStoppedInPython:
+    """The four tests the ruling inverted, CONVERTED rather than deleted.
+
+    Each one still runs the same attack. Each one now asserts the boundary
+    that actually exists: the config layer lets the six through as a ratchet,
+    and naukri's Python guards are what bound the result. A suite that simply
+    dropped these would be strictly worse than one that states the new line.
+    """
 
     @pytest.mark.parametrize("label,patch", ESCALATION,
                              ids=[label for label, _ in ESCALATION])
-    def test_each_step_is_refused_by_name(self, cfg, label, patch):
+    def test_each_step_is_ACCEPTED_by_name_with_confirmation(self, cfg, label,
+                                                             patch):
+        """Was ``test_each_step_is_refused_by_name``.
+
+        Every step is a LOOSENING of a tier-B key, so it costs an explicit
+        ``confirm_widen`` and then it lands. That flag is the whole remaining
+        friction at this layer, and it is friction, not a gate.
+        """
+        out = C.apply_patch(patch, path=cfg, actor="attacker",
+                            allowed_sections=("candidate", "scoring",
+                                              "servers.naukri"),
+                            confirm_widen=True)
+        assert out["status"] == "ok", (label, out)
+
+    @pytest.mark.parametrize("label,patch", ESCALATION,
+                             ids=[label for label, _ in ESCALATION])
+    def test_every_step_is_STILL_refused_without_confirm_widen(self, cfg, label,
+                                                               patch):
+        """CONTROL for the pair above, and the ratchet in its own right.
+
+        Refuse-then-accept is what makes both halves meaningful: if the write
+        landed either way the confirmation would be decoration, and if it
+        refused either way the acceptance test above would be passing on a
+        typo.
+        """
         out = C.apply_patch(patch, path=cfg, actor="attacker",
                             allowed_sections=("candidate", "scoring",
                                               "servers.naukri"))
         assert out["status"] == "refused", (label, out)
-        assert any("tier C" in r for r in out["refusals"]), out["refusals"]
+        assert "confirm_widen" in " ".join(out["refusals"]), out["refusals"]
 
-    def test_the_whole_sequence_changes_nothing(self, cfg):
-        for _label, patch in ESCALATION:
-            C.apply_patch(patch, path=cfg, actor="attacker",
-                          allowed_sections=("candidate", "scoring",
-                                            "servers.naukri"),
-                          confirm_widen=True)
-        agent = C.current().policy.server("naukri")["agent"]
-        assert agent["enabled"] is False
-        assert agent["mode"] == "dry_run"
-        assert agent["min_fit_score"] == 70
-        assert agent["blocklist"]["enabled"] is True
-        assert list(agent["searches"]) == []
-        assert json.loads(cfg.read_text(encoding="utf-8")).get("servers") is None, (
-            "not one byte of the escalation reached the file"
-        )
+    def test_the_whole_sequence_ARMS_the_agent(self, cfg):
+        """Was ``test_the_whole_sequence_changes_nothing``.
 
-    def test_confirm_widen_does_not_unlock_any_step(self, cfg):
+        The inversion, stated at full strength: all five writes land, the
+        agent block in the loaded policy is armed, aimed and unfiltered, and
+        the file on disk says so. What this does NOT show is an application
+        being submitted -- see the class below, and naukri's suite.
+        """
         for label, patch in ESCALATION:
             out = C.apply_patch(patch, path=cfg, actor="attacker",
                                 allowed_sections=("candidate", "scoring",
                                                   "servers.naukri"),
                                 confirm_widen=True)
-            assert out["status"] == "refused", (label, out)
+            assert out["status"] == "ok", (label, out)
 
-    def test_a_HAND_EDITED_file_cannot_arm_it_either(self, cfg):
-        """The file is the surface a text editor reaches, so it is THE surface.
+        agent = C.current().policy.server("naukri")["agent"]
+        assert agent["enabled"] is True
+        assert agent["mode"] == "auto"
+        assert agent["min_fit_score"] == 0
+        assert agent["blocklist"]["enabled"] is False
+        assert len(agent["searches"]) == 1
 
-        A write-path guard that the file bypasses is not a guard.
+        on_disk = json.loads(cfg.read_text(encoding="utf-8"))
+        assert on_disk["servers"]["naukri"]["agent"]["mode"] == "auto", (
+            "every byte of the escalation reached the file"
+        )
+
+    def test_a_HAND_EDITED_file_CAN_arm_it_now(self, cfg):
+        """Was ``test_a_HAND_EDITED_file_cannot_arm_it_either``.
+
+        The file is the surface a text editor reaches, so it is THE surface --
+        that reasoning is unchanged and is exactly why the ruling had to be
+        made at the tier, not at the write path. Notepad now arms the agent,
+        with no ceremony at all, and everything that stops it from applying to
+        the wrong thing lives in naukri.
         """
         cfg.write_text(json.dumps({
             "config_version": 1, "revision": 1,
             "servers": {"naukri": {"agent": {
                 "enabled": True, "mode": "auto", "min_fit_score": 0,
-                "per_search_limit": 500,
+                "per_search_limit": 50,
                 "blocklist": {"enabled": False},
-                "searches": [{"name": "anything", "query": "*"}],
+                "searches": [{"name": "anything", "keywords": "*"}],
             }}},
         }, indent=2), encoding="utf-8")
         C.invalidate_cache()
 
         loaded = C.current()
         agent = loaded.policy.server("naukri")["agent"]
-        assert agent["enabled"] is False
-        assert agent["mode"] == "dry_run"
-        assert agent["min_fit_score"] == 70
-        assert agent["per_search_limit"] == 20
-        assert agent["blocklist"]["enabled"] is True
-        assert list(agent["searches"]) == []
-        assert len(loaded.tier_c_refusals) == 6
-        assert all("REFUSED" in r for r in loaded.tier_c_refusals)
+        assert agent["enabled"] is True
+        assert agent["mode"] == "auto"
+        assert agent["min_fit_score"] == 0
+        assert agent["per_search_limit"] == 50
+        assert agent["blocklist"]["enabled"] is False
+        assert len(agent["searches"]) == 1
+        assert loaded.tier_c_refusals == (), (
+            "nothing in the escalation is tier C any more"
+        )
+
+    def test_a_HAND_EDIT_still_cannot_pass_the_python_ceilings(self, cfg):
+        """CONTROL, and the honest limit of the sentence above.
+
+        The load path does not clamp -- jobcore enforces floor/ceiling on the
+        WRITE path only -- so a hand edit reaches naukri with any integer at
+        all. That is a statement about where the clamp lives, not an absence
+        of one: `_decide` clamps `min_fit_score` to the floor and
+        `per_search_limit` to its ceiling on every cycle. Asserted here so the
+        division of labour is written down rather than assumed.
+        """
+        cfg.write_text(json.dumps({
+            "config_version": 1, "revision": 1,
+            "servers": {"naukri": {"agent": {"per_search_limit": 100_000}}},
+        }, indent=2), encoding="utf-8")
+        C.invalidate_cache()
+        assert C.current().policy.server("naukri")["agent"][
+            "per_search_limit"] == 100_000
+
+        # ...but the WRITE path refuses the same value, confirmed or not.
+        out = C.apply_patch(
+            {"servers": {"naukri": {"agent": {"per_search_limit": 100_000}}}},
+            path=cfg, actor="attacker", allowed_sections=("servers.naukri",),
+            confirm_widen=True)
+        assert out["status"] == "refused", out
+        assert "ceiling" in " ".join(out["refusals"])
+
+    def test_the_daily_quota_did_NOT_join_the_six(self, cfg):
+        """It is one of the four Python guards, so it kept its ceiling.
+
+        A guard whose value the same file can raise is worth less than one it
+        cannot: `max_daily_applications` ratchets DOWN freely and cannot pass
+        25 even with confirmation, and naukri does not read it from this file
+        at all.
+        """
+        out = C.apply_patch(
+            {"servers": {"naukri": {"agent": {"max_daily_applications": 99}}}},
+            path=cfg, actor="attacker", allowed_sections=("servers.naukri",),
+            confirm_widen=True)
+        assert out["status"] == "refused", out
+        assert "ceiling 25" in " ".join(out["refusals"])
+
+        tighten = C.apply_patch(
+            {"servers": {"naukri": {"agent": {"max_daily_applications": 3}}}},
+            path=cfg, actor="attacker", allowed_sections=("servers.naukri",))
+        assert tighten["status"] == "ok", tighten
 
     def test_a_future_key_under_the_agent_subtree_is_denied_by_default(self, cfg):
-        """The escalation opened because two keys had NO tier. Omission is the
-        bug; deny-by-default is the fix."""
+        """UNCHANGED by the ruling, and the half that most needed to survive.
+
+        The escalation opened because two keys had NO tier. Six keys are named
+        and loadable now; the seventh, invented tomorrow, is still refused --
+        omission is the bug, deny-by-default is the fix, and naming six
+        exceptions is not the same as removing the rule.
+        """
         out = C.apply_patch(
             {"servers": {"naukri": {"agent": {"newly_invented_switch": True}}}},
             path=cfg, actor="attacker",
-            allowed_sections=("candidate", "scoring", "servers.naukri"))
+            allowed_sections=("candidate", "scoring", "servers.naukri"),
+            confirm_widen=True)
         assert out["status"] == "refused"
         assert "tier C" in " ".join(out["refusals"])
 
-    def test_a_per_search_min_fit_score_override_is_refused_too(self, cfg):
+    def test_a_bare_min_fit_score_leaf_ELSEWHERE_is_still_tier_c(self, cfg):
+        """Was ``test_a_per_search_min_fit_score_override_is_refused_too``.
+
+        `TIER_C_LEAF_NAMES` did not go away; it acquired exactly one declared
+        exception. `servers.naukri.agent.min_fit_score` is tier B by name, and
+        every other spelling of that leaf -- another server's, a nested one, a
+        per-search override -- is still refused. That is what stops the ruling
+        from generalising itself to keys nobody ruled on.
+        """
         out = C.apply_patch(
             {"servers": {"uplers": {"min_fit_score": 0}}},
             path=cfg, actor="uplers",
-            allowed_sections=("candidate", "scoring", "servers.uplers"))
+            allowed_sections=("candidate", "scoring", "servers.uplers"),
+            confirm_widen=True)
         assert out["status"] == "refused"
+        assert "tier C" in " ".join(out["refusals"])
+
+        assert P.tier_for("servers.naukri.agent.min_fit_score") == P.TIER_B
+        for elsewhere in ("servers.uplers.min_fit_score",
+                          "servers.naukri.min_fit_score",
+                          "servers.naukri.agent.searches.0.min_fit_score",
+                          "servers.instahyre.queue.min_fit_score"):
+            assert P.tier_for(elsewhere) == P.TIER_C, elsewhere
 
 
 class TestNoSiblingServerCanDriveAnothersSelector:
@@ -328,7 +461,22 @@ class TestNoSiblingServerCanDriveAnothersSelector:
 
 
 class TestTheSecondFloorConfigCannotReach:
-    """C1 fix 3: a bad threshold must cost display noise, not applications."""
+    """C1 fix 3: a bad threshold must cost display noise, not applications.
+
+    AFTER 2026-08-25 THIS IS THE LOAD-BEARING GUARD, not a second layer. The
+    file may now set `agent.min_fit_score: 0`; this floor is what makes that
+    cost display noise rather than applications, and it is a jobcore constant
+    with no config key anywhere, which is why the assertions live here.
+
+    What this class CANNOT show is the clamp firing, because the clamp is
+    `max(configured, floor)` in `naukri_server.agent._decide` and jobcore
+    cannot import naukri (zero runtime deps; `test_independence.py` runs a
+    clean interpreter). That half is proved in
+    `naukri/tests/test_safety_invariant.py::TestTheFloorTheFileCannotReach`,
+    which plants `min_fit_score: 0` in a real file and asserts the search was
+    asked for 60. Do not read the absence of that assertion here as its
+    absence from the system.
+    """
 
     def test_the_floor_exists_in_python_and_is_not_a_config_key(self):
         assert C.MIN_AGENT_FIT_FLOOR == 60

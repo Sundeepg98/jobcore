@@ -36,17 +36,25 @@ graph**, never from what it is called.
        for transparency; a differing value is refused loudly and the Python
        value is used. A write is refused by name.
 
-Tier C exists to hold one invariant, to which everything else is subordinate:
+Tier C once held one invariant, and that invariant is now RETIRED -- read this
+before quoting the old sentence back at the code:
 
-    **No sequence of config writes, from any server, may grant autonomous
-    apply authority.**
+    Until 2026-08-25: *no sequence of config writes, from any server, may grant
+    autonomous apply authority.* **This is no longer true, deliberately.**
 
 The escalation the tier table was built to stop is traced in
 ``tests/test_safety_invariant.py``: ``agent.enabled`` -> ``agent.mode:"auto"``
 -> ``min_fit_score:0`` -> ``blocklist.enabled:false`` -> arbitrary searches
 = real applications, per day, on a live account, with no human in the loop.
-Every one of those five keys is Tier C here, and so is anything else under an
-``agent`` subtree that this schema does not explicitly name.
+The operator overruled the CONCLUSION and kept the PROTECTIONS. Those five
+keys plus ``per_search_limit`` are now Tier B: loadable, ratcheted, and
+bounded -- see the ``servers.naukri`` block for the four Python protections
+that actually hold the line, and for the one honest caveat about which of
+them the agent block does and does not trip.
+
+What did NOT change: anything under an ``agent`` subtree that this schema does
+not explicitly name is still Tier C. Omission is how the escalation opened, so
+the subtree still denies by default.
 
 Two levers reach the same selector without touching the agent block at all —
 inflating ``candidate.skills`` until every job scores 100, and collapsing
@@ -208,6 +216,20 @@ HARD_LIMITS = FrozenMap({
     "rank_adjustment_max": 4,
     # A rule list long enough to be unauditable is not a preference.
     "rank_adjustment_rules_max": 20,
+    # The agent block became loadable on 2026-08-25 (see the servers.naukri
+    # section below). These two bound the shapes that arrive with it. Neither
+    # is the safety story -- the four Python protections in naukri's agent.py
+    # are -- but a ratchet with no python-side bound is not a ratchet, so the
+    # two list-ish keys carry one.
+    #
+    # A search list long enough to be unauditable is not a policy: he cannot
+    # read twenty-one queries and say what the agent will do.
+    "agent_searches_max": 20,
+    # How many results per agent search enter the apply queue. Above the
+    # daily-application ceiling it buys nothing at all -- `_decide` caps
+    # candidates at `daily_remaining` long before `_act` sees them -- so this
+    # is a bound on wasted scoring, not on applications.
+    "agent_per_search_limit_ceiling": 100,
 })
 
 #: Frozen at import, like the KeySpec bounds, so rewriting ``HARD_LIMITS`` in
@@ -294,14 +316,24 @@ class KeySpec:
         return (literals, -wilds)
 
 
-# A leaf name that is ALWAYS tier C wherever it appears. ``min_fit_score`` is
-# naukri's autonomous-apply SELECTOR (agent.py:151 reads it, then every job
-# above it is enqueued with apply_status "pending"), not a display filter --
-# and a per-search override reintroduces it one level down. The display-side
-# filter lives under the deliberately unambiguous name
+# A leaf name that is tier C wherever it appears EXCEPT where a spec names it
+# explicitly -- `spec_for` resolves exact declarations first, so this is the
+# rule for undeclared occurrences only. As of 2026-08-25 there is exactly one
+# declared exception, `servers.naukri.agent.min_fit_score` (tier B), and this
+# rule still covers every other spelling: another server's
+# `servers.<x>.min_fit_score`, a nested `queue.min_fit_score`, and any future
+# copy of the name.
+#
+# `min_fit_score` is naukri's autonomous-apply SELECTOR (`_decide` enqueues
+# every job at or above it with apply_status "pending"), not a display filter.
+# The display-side filter lives under the deliberately unambiguous name
 # ``servers.naukri.display_min_score`` so the two decisions cannot be confused
 # again (they are 60 and 70 today, and collapsing them to one value would
 # silently drop the agent's threshold by ten points).
+#
+# Per-search overrides never reach this rule at all: `flatten` treats a list as
+# a leaf, so `searches[0].min_fit_score` is not a path the schema ever sees.
+# The Python floor, re-applied per search in `_decide`, is what bounds those.
 TIER_C_LEAF_NAMES = frozenset({"min_fit_score"})
 
 
@@ -500,33 +532,86 @@ _SCHEMA_LIST: tuple[KeySpec, ...] = (
     # DENY BY DEFAULT under any agent subtree. This one line is what stops the
     # next key added under `agent` from arriving as Tier A by omission --
     # `enabled` and `mode` had no tier at all in the design, which is how the
-    # escalation path opened.
+    # escalation path opened. It is UNCHANGED by the 2026-08-25 ruling below:
+    # the six keys named under it are loadable BY NAME, and a seventh invented
+    # tomorrow is still refused.
     _spec("servers.*.agent.**", TIER_C,
           "Anything under an agent block that this schema does not explicitly "
-          "name is refused. Autonomous-apply machinery is opt-in by source "
-          "edit, never by omission."),
-    _spec("servers.naukri.agent.enabled", TIER_C,
-          "Arms the autonomous apply loop. false -> true has no 'tighter' "
-          "direction, so it cannot be a ratchet; env + restart is the right "
-          "friction, exactly as for the kill-switch thresholds.",
-          default=False),
-    _spec("servers.naukri.agent.mode", TIER_C,
+          "name is refused. Autonomous-apply machinery is opt-in by an "
+          "explicitly named key, never by omission."),
+
+    # THE SIX, AND WHAT ACTUALLY BOUNDS THEM (ruling 2026-08-25).
+    #
+    # These were tier C. The reasoning that put them there traced a five-write
+    # escalation -- enabled -> mode:auto -> min_fit_score:0 -> blocklist off ->
+    # arbitrary searches -- ending at fifteen unapproved applications a day.
+    # That reasoning was SOUND and the conclusion has been overruled: the file
+    # may now ARM the agent. The protections were NOT overruled, and none of
+    # them ever lived in this schema. They live in Python, in naukri's
+    # `agent.py`, where no config write of any kind can reach them:
+    #
+    #   1. MIN_AGENT_FIT_FLOOR (=60) -- `_decide` computes
+    #      `min_fit = max(configured, floor)` and re-applies the same `max()`
+    #      to every per-search override. `min_fit_score: 0` from ANY source,
+    #      this file included, selects nothing under 60.
+    #   2. The forced approval cycle -- `_effective_mode` downgrades "auto" to
+    #      "approval" for one cycle whenever the POLICY fingerprint moves, and
+    #      on the first-ever cycle (`requires_approval_cycle(h, None)` is
+    #      True). Keyed on {scoring, candidate}; see the caveat below.
+    #   3. The kill switch -- checked inside the auto-apply loop itself.
+    #   4. The daily quota -- `_decide` caps candidates at `daily_remaining`
+    #      BEFORE `_act` runs, and `validate_agent_config` bounds
+    #      `max_daily_applications` to 1-100 whatever the source.
+    #
+    # THE HONEST CAVEAT, so nobody re-derives it as a discovery: protection 2
+    # is keyed on `policy_hash`, which covers {scoring, candidate} and NOT
+    # `servers.*`. Writing `mode: "auto"` here therefore does NOT itself force
+    # an approval cycle -- that guard was built for the two levers that CANNOT
+    # be tier C (candidate.skills, scoring), and it still catches those. What
+    # bounds a file-armed agent is 1, 3 and 4, plus tier B's own ratchet: every
+    # one of the six loosens only with confirm_widen on the write path, and
+    # naukri re-validates all six through `validate_agent_config` on load.
+    #
+    # Tier B, not tier A, for all six. Tightening stays free; loosening costs
+    # an explicit flag.
+    _spec("servers.naukri.agent.enabled", TIER_B,
+          "Arms the autonomous apply loop. Disarming is free; arming is the "
+          "loosening direction and needs confirm_widen. What the armed loop "
+          "may then do is bounded in Python, not here.",
+          ("naukri",), default=False, direction="down",
+          choices=(False, True)),
+    _spec("servers.naukri.agent.mode", TIER_B,
           "dry_run | approval | auto. 'auto' takes the branch that applies "
-          "with no human approval.", default="dry_run",
+          "with no human approval. Any change needs confirm_widen: the values "
+          "are not ordered, so `_is_loosening` treats every move as loosening "
+          "-- more friction than a ratchet, never less.",
+          ("naukri",), default="dry_run", direction="down",
           choices=("dry_run", "approval", "auto")),
-    _spec("servers.naukri.agent.min_fit_score", TIER_C,
-          "The apply SELECTOR (agent.py:151). 70 today -- a different "
-          "decision from the display filter's 60, not a drifted copy of it.",
-          default=70),
-    _spec("servers.naukri.agent.searches", TIER_C,
-          "Each entry carries its own min_fit_score override, so this is the "
-          "selector again one level down.", default=()),
-    _spec("servers.naukri.agent.per_search_limit", TIER_C,
-          "How many results per agent search enter the apply queue.",
-          default=20),
-    _spec("servers.naukri.agent.blocklist.enabled", TIER_C,
+    _spec("servers.naukri.agent.min_fit_score", TIER_B,
+          "The apply SELECTOR -- a different decision from the display "
+          "filter's 60, not a drifted copy of it. Raising is free; lowering "
+          "needs confirm_widen and CANNOT take the agent below "
+          "MIN_AGENT_FIT_FLOOR, which is enforced in Python on every cycle.",
+          ("naukri",), default=70, direction="up", floor=0.0, ceiling=100.0),
+    _spec("servers.naukri.agent.searches", TIER_B,
+          "What the agent looks for. Each entry may carry its own "
+          "min_fit_score override; those overrides are LIST ELEMENTS, so they "
+          "never reach this schema at all -- the Python floor is what bounds "
+          "them, applied per search. An EMPTY list means 'not specified' to "
+          "naukri's loader, never 'search for nothing'.",
+          ("naukri",), default=(), direction="shrink",
+          max_items=int(HARD_LIMITS["agent_searches_max"])),
+    _spec("servers.naukri.agent.per_search_limit", TIER_B,
+          "How many results per agent search enter the apply queue. Bounded "
+          "downstream by the daily cap regardless, so this bounds wasted "
+          "scoring rather than applications.",
+          ("naukri",), default=20, direction="down", floor=1.0,
+          ceiling=float(HARD_LIMITS["agent_per_search_limit_ceiling"])),
+    _spec("servers.naukri.agent.blocklist.enabled", TIER_B,
           "Turning the blocklist off makes companies he blocked eligible for "
-          "an irreversible application.", default=True),
+          "an irreversible application, so True is the safe state and "
+          "switching it off is the loosening direction.",
+          ("naukri",), default=True, direction="up"),
     _spec("servers.naukri.agent.blocklist.companies", TIER_B,
           "Adding is free; removing is the loosening direction.",
           ("naukri",), default=(), direction="grow"),

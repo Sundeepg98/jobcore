@@ -146,10 +146,42 @@ class TestTierIsData:
             assert spec.direction is not None, spec.path
             assert (spec.ceiling is not None or spec.floor is not None
                     or spec.max_items is not None
+                    or spec.choices is not None
                     or spec.direction in ("grow", "shrink", "up")), (
                 f"{spec.path}: a ratchet with no python-side bound is not a "
                 f"ratchet — the file could walk it anywhere one step at a time"
             )
+
+    def test_choices_counts_as_a_bound_because_it_is_one(self):
+        """`choices` joined the accepted bounds above on 2026-08-25.
+
+        The rule that list is enforcing is WALKABILITY: a ratchet whose value
+        can be nudged one step at a time to anywhere is not a ratchet. An
+        enumerated domain cannot be walked anywhere -- there is nowhere else to
+        go -- and `_check_choices` refuses an off-menu value at every tier, so
+        it bounds strictly harder than a ceiling does.
+
+        Both keys that rely on it are booleans-or-enums that arrived when the
+        agent block became loadable.
+        """
+        for path in ("servers.naukri.agent.enabled", "servers.naukri.agent.mode"):
+            spec = P.SCHEMA[path]
+            assert spec.tier == P.TIER_B, path
+            assert spec.choices, path
+            assert spec.ceiling is None and spec.floor is None, path
+
+    def test_a_tier_b_spec_with_no_bound_at_all_is_still_caught(self):
+        """CONTROL for the rule above: it must be able to fail.
+
+        `direction="down"` is the one direction with no blanket exemption, so a
+        spec with that direction and no ceiling/floor/max_items/choices is the
+        shape the assertion exists to reject.
+        """
+        naked = P.KeySpec(path="servers.naukri.agent.made_up", tier=P.TIER_B,
+                          doc="x", readers=("naukri",), direction="down")
+        assert not (naked.ceiling is not None or naked.floor is not None
+                    or naked.max_items is not None or naked.choices is not None
+                    or naked.direction in ("grow", "shrink", "up"))
 
     def test_tier_c_is_never_loadable(self):
         for spec in P.iter_specs():
@@ -171,16 +203,59 @@ class TestTierIsData:
         with pytest.raises(P.PolicyError, match="ratchet"):
             P.KeySpec(path="scoring.x", tier=P.TIER_B, doc="x", readers=("jobcore",))
 
-    @pytest.mark.parametrize("path", [
-        "servers.naukri.agent.enabled",
-        "servers.naukri.agent.mode",
-        "servers.naukri.agent.min_fit_score",
-        "servers.naukri.agent.searches",
-        "servers.naukri.agent.blocklist.enabled",
-        "servers.naukri.agent.per_search_limit",
-    ])
-    def test_the_traced_escalation_keys_are_all_tier_c(self, path):
-        assert P.tier_for(path) == P.TIER_C
+    #: The five traced escalation steps plus `per_search_limit`, with the
+    #: direction that LOOSENS each one. Tier C until 2026-08-25; tier B since.
+    ESCALATION_KEYS = [
+        ("servers.naukri.agent.enabled", "down"),
+        ("servers.naukri.agent.mode", "down"),
+        ("servers.naukri.agent.min_fit_score", "up"),
+        ("servers.naukri.agent.searches", "shrink"),
+        ("servers.naukri.agent.blocklist.enabled", "up"),
+        ("servers.naukri.agent.per_search_limit", "down"),
+    ]
+
+    @pytest.mark.parametrize("path,direction", ESCALATION_KEYS,
+                             ids=[p.rsplit(".", 1)[-1] for p, _ in ESCALATION_KEYS])
+    def test_the_traced_escalation_keys_are_loadable_but_ratcheted(self, path,
+                                                                   direction):
+        """The 2026-08-25 ruling, as data.
+
+        These six were tier C because a five-write escalation through them
+        ended at fifteen unapproved applications a day. The operator overruled
+        the CONCLUSION and kept the PROTECTIONS, which never lived in this
+        schema -- they are four Python guards in naukri's `agent.py`.
+
+        Tier B, not tier A, is the part this test pins: the file can arm the
+        agent, but every one of the six loosens only with `confirm_widen`, and
+        each declares which way loosening runs.
+        """
+        spec = P.SCHEMA[path]
+        assert spec.tier == P.TIER_B, path
+        assert spec.loadable, path
+        assert spec.direction == direction, path
+        assert spec.readers == ("naukri",), (
+            f"{path}: a loadable key must name a real reader -- the anti-decoy "
+            f"rule is what forced `per_search_limit` to acquire one"
+        )
+
+    def test_the_daily_quota_is_NOT_one_of_the_six(self):
+        """It is the fourth Python guard, so the ruling left it alone.
+
+        Tier B here (it always was, and `_check_ratchet` holds it under the
+        Python ceiling), but naukri's agent does not take it from the shared
+        file at all -- see `agent.FILE_DECIDABLE_KEYS`. Two different questions;
+        this one is only about the schema.
+        """
+        spec = P.SCHEMA["servers.naukri.agent.max_daily_applications"]
+        assert spec.tier == P.TIER_B
+        assert spec.direction == "down"
+        assert spec.ceiling == float(P.HARD_LIMITS["max_daily_applications_ceiling"])
+
+    def test_the_ruling_did_NOT_touch_the_deny_by_default_subtree(self):
+        """The half that must not move. Named keys are loadable; the subtree
+        is not, and that is what stops the NEXT key arriving by omission."""
+        assert P.tier_for("servers.naukri.agent.newly_invented_switch") == P.TIER_C
+        assert P.SCHEMA["servers.*.agent.**"].tier == P.TIER_C
 
     @pytest.mark.parametrize("path", [
         "servers.naukri.agent.some_future_key",

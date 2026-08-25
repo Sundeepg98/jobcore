@@ -969,13 +969,42 @@ def _check_ratchet(spec: KeySpec, key: str, old, new, confirm_widen: bool
     return None
 
 
+def _hashable_set(value) -> set:
+    """Set of *value*'s elements, with unhashable ones stood in for by JSON.
+
+    ``set([{...}])`` raises ``TypeError: unhashable type: 'dict'``, and the
+    ratchet comparison below is the only thing standing between a tier-B list
+    key and an unhandled exception out of :func:`apply_patch`. That was latent
+    for as long as every tier-B list held strings (``blocklist.companies``,
+    ``candidate.skills``); ``servers.naukri.agent.searches`` is a list of
+    DICTS, so it became reachable the moment that key left tier C on
+    2026-08-25. Reproduced before fixing::
+
+        _is_loosening(spec_for("servers.naukri.agent.searches"),
+                      [{"name": "a"}], [{"name": "a"}, {"name": "b"}])
+        -> TypeError: unhashable type: 'dict'
+
+    Canonical JSON is the stand-in because it makes set membership mean
+    "identical entry", which is exactly the question grow/shrink asks. It is
+    NOT an ordering claim: two entries differing only in key order compare
+    equal, which is correct here and is why ``sort_keys`` is set.
+    """
+    out = set()
+    for item in value or ():
+        try:
+            out.add(item)
+        except TypeError:
+            out.add(json.dumps(item, sort_keys=True, default=str))
+    return out
+
+
 def _is_loosening(spec: KeySpec, old, new) -> bool:
     if old is None or _same(old, new):
         return False
     direction = spec.direction
     if direction in ("grow", "shrink"):
-        old_set = set(old or ()) if isinstance(old, (list, tuple, set)) else set()
-        new_set = set(new or ()) if isinstance(new, (list, tuple, set)) else set()
+        old_set = _hashable_set(old) if isinstance(old, (list, tuple, set)) else set()
+        new_set = _hashable_set(new) if isinstance(new, (list, tuple, set)) else set()
         if direction == "grow":       # a longer list is tighter (a blocklist)
             return not new_set >= old_set
         return not new_set <= old_set  # a shorter list is tighter (a skill list)
