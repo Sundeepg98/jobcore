@@ -214,7 +214,7 @@ class TestSubstitutionIsExactNotHeuristic:
         loose = re.compile(r"[A-Za-z]:[\\/]")
         assert loose.search("https://www.naukri.com/x")
         assert not DRIVE_PATH.search("https://www.naukri.com/x")
-        assert DRIVE_PATH.search(r"D:\Sundeep\projects")
+        assert DRIVE_PATH.search(r"D:\workspace\projects")
 
 
 class TestTheExactDetectorIsOnlyExactForThisGeometry:

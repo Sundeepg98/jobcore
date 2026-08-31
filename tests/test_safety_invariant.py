@@ -568,7 +568,7 @@ class TestWhatTheOperatorCanStillDo:
 
     def test_he_can_describe_himself(self, cfg):
         out = C.apply_patch({"candidate": {
-            "name": "G. Sundeep",
+            "name": "G. Whitfield",
             "headline": "Backend Software Engineer",
             "locations": ["Bangalore", "Hyderabad"],
             "work_mode_preference": ["remote", "hybrid", "office"],

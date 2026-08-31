@@ -1,6 +1,6 @@
 """Paths a caller can act on, that are not this machine's absolute layout.
 
-A live sweep on 2026-08-20 found ``D:\\Sundeep\\projects\\...`` inside MCP tool
+A live sweep on 2026-08-20 found ``D:\\<given-name>\\projects\\...`` inside MCP tool
 results. That is wrong twice over: it publishes the machine's directory layout
 into any shared transcript or future public release, and it is paid for in
 tokens on every response that carries it.

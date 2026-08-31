@@ -799,7 +799,7 @@ class TestTheLedgerMakesHandEditsFirstClass:
 
     def test_an_edit_that_cannot_move_a_score_does_not_churn_the_stamp(self, cfg):
         a = C.current()
-        write_config(cfg, candidate={"name": "G. Sundeep",
+        write_config(cfg, candidate={"name": "G. Whitfield",
                                      "headline": "Backend Engineer"})
         b = C.current()
         assert b.policy_hash == a.policy_hash

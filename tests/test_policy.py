@@ -330,7 +330,7 @@ class TestRoundTrip:
     def test_a_customised_policy_round_trips(self):
         custom = P.Policy(
             candidate=P.CandidatePolicy(
-                name="G. Sundeep",
+                name="G. Whitfield",
                 skills=("node.js", "typescript"),
                 locations=("Bangalore", "Hyderabad"),
                 work_mode_preference=("hybrid", "remote", "office"),
