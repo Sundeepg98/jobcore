@@ -171,6 +171,23 @@ BINARY_SUFFIXES = frozenset(
 #: control for all three and is worth more than the rules it guards.
 BACKSLASH = chr(92)
 
+#: A LONE FORWARD SLASH, and it is here for a reason discovered the hard way.
+#:
+#: The backslash plants below were composed from :data:`BACKSLASH` from the
+#: start, so this module's text carried no backslash-spelled path. The SLASH
+#: spellings were written as ordinary literals, because a forward slash needs
+#: no escaping and the escaping is what the composition was guarding against.
+#: That reasoning was wrong, and it was wrong in the direction that matters:
+#: composition is not only about surviving transport, it is about **this file
+#: not becoming the very thing it hunts.**
+#:
+#: The literals sat here undetected while the file was UNTRACKED -- the sweep
+#: reads ``git ls-files``, so a new test file is invisible to its own check
+#: until it is added. The instant it was committed the sweep flagged it: two
+#: hits, in the guard, reported by the guard. Its author is exactly the reader
+#: the message "not by escaping it differently" was written for.
+SLASH = chr(47)
+
 
 def redact(value: str) -> str:
     """``<first2>..<last2>`` plus a length. Never the path itself.
@@ -263,6 +280,28 @@ def test_no_tracked_file_carries_a_machine_path(rel):
     )
 
 
+def test_this_guard_is_itself_swept():
+    """THE FILE MOST LIKELY TO CARRY A PATH SHAPE IS THIS ONE, and for most of
+    its first hour it was exempt from its own check without anyone choosing
+    that.
+
+    :func:`sweepable` reads ``git ls-files``, so an UNTRACKED file is invisible
+    to the sweep -- and a brand-new test file is untracked for exactly as long
+    as it takes to write it and run it. Two plants in this module were written
+    as literals rather than composed, the suite ran green fifty times over, and
+    the hits appeared the instant the file was committed. Green meant "not
+    looked at", which is the failure mode the whole module is built against.
+
+    So the guard asserts it is looking at itself. If this file is ever
+    untracked, renamed without being re-added, or excluded, this fails rather
+    than quietly certifying one fewer file than the reader believes.
+    """
+    assert "tests/test_no_committed_path.py" in sweepable(), (
+        "this guard is not in git ls-files, so the sweep above is not reading "
+        "it -- the one file guaranteed to contain path-shaped test data"
+    )
+
+
 def test_the_sweep_actually_looked():
     """A parametrised sweep passes vacuously on an empty file list.
 
@@ -299,7 +338,10 @@ def test_the_sweep_actually_looked():
             "drive root",
             '"args": ["D:' + BACKSLASH * 2 + "Ravenscroft" + BACKSLASH * 2 + 'src"]',
         ),
-        ("drive root", "D:/Ravenscroft/projects"),
+        # COMPOSED, like the backslash forms and for the same reason: written
+        # as a literal this line was itself a tracked drive root, and the
+        # sweep said so the moment the file entered git.
+        ("drive root", "D:" + SLASH + "Ravenscroft" + SLASH + "projects"),
         (
             "user path",
             "C:" + BACKSLASH + "Users" + BACKSLASH + "rmarchetti" + BACKSLASH + "App",
@@ -308,7 +350,7 @@ def test_the_sweep_actually_looked():
             "user path",
             "C:" + BACKSLASH * 2 + "Users" + BACKSLASH * 2 + "rmarchetti",
         ),
-        ("user path", "/home/rmarchetti/.config/thing"),
+        ("user path", SLASH + "home" + SLASH + "rmarchetti" + SLASH + ".config"),
     ],
 )
 def test_every_rule_can_actually_fail(rule, planted):
