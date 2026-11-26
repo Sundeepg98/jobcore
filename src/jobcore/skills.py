@@ -36,6 +36,15 @@ is narrow on purpose:
 
 Every derived case is pinned in ``tests/test_normalisation.py`` alongside the
 false merges it must not make.
+
+A third table: names that are not skills
+----------------------------------------
+A board's tag list also carries the name of a DISCIPLINE -- "Backend", "Full
+Stack" -- spelled several ways. Those are not skills, and must not become
+skills (a consumer's skill-gap report depends on it), but fit scoring counts
+them like any unknown tag, so two spellings of one must still be ONE token.
+``SYNONYM_FOLDS`` folds them without ever entering the skill lookup; see the
+comment above it and ``tests/test_synonym_folds.py``.
 """
 
 from __future__ import annotations
@@ -173,6 +182,43 @@ def _merge_misspellings() -> None:
 _merge_misspellings()
 
 
+# ── Synonym folds: one token per term, WITHOUT making it a skill ─────────────
+# Token -> its other spellings, for terms the skill vocabulary does not list.
+#
+# A board's tag list carries more than skills. Naukri tags jobs "Backend",
+# "Full Stack" and "Fullstack Development": the name of a DISCIPLINE, spelled
+# several ways. Two facts about those tags pull in opposite directions, and
+# this table exists to honour both.
+#
+# 1. They are not skills. naukri's skill-gap report keeps only tokens this
+#    vocabulary recognises, so that it never advises learning "full stack",
+#    and its suite pins that "full stack" and "fullstack development" are NOT
+#    taxonomy tokens. An entry in SKILL_ALIASES would make them tokens (three
+#    of those tests go red), so a fold never enters the skill lookup,
+#    canonical_count, alias_count or the golden floor.
+# 2. Fit scoring counts them anyway, like every unknown tag -- dropping a tag
+#    would make a job look like a better match than it is. So two spellings of
+#    one discipline must be ONE token, or a profile listing "Backend
+#    Development" misses a job tagged "Backend", and a job tagged both "Full
+#    Stack" and "Fullstack Development" counts one discipline twice.
+#
+# A fold applies only to a string the skill vocabulary left unresolved, so it
+# can never change an answer the vocabulary already had. A fold's spellings
+# get the same mechanical derivation as skills ("Back-End", "full-stack"), so
+# only the SEMANTIC variants are listed.
+#
+# Receipts (2026-11-26): 80 scored Naukri rows tagged "full stack" 28,
+# "fullstack development" 16, "backend" 10, "backend development" 3, "front
+# end" 1, "frontend development" 1. 382 Uplers requisitions and 645 Instahyre
+# jobs add "backend development" 4, "backend developer" 1, "back-end" 1,
+# "frontend" 4, "front-end" 2, "full stack development" 1, "fullstack" 1.
+SYNONYM_FOLDS: dict[str, set[str]] = {
+    "backend": {"backend development", "backend developer"},
+    "full stack": {"fullstack development"},
+    "frontend": {"frontend development"},
+}
+
+
 # ── Surface hygiene ──────────────────────────────────
 
 # Characters a word processor substitutes for the plain ASCII ones. None of them
@@ -233,47 +279,97 @@ def _derived_key(surface: str) -> str:
     return surface.translate(_SEPARATOR_TABLE)
 
 
+def _derived_index(lookup: dict[str, str]) -> tuple[dict[str, str], frozenset[str]]:
+    """Separator-free key -> canonical, plus the keys that were refused.
+
+    A key two different canonicals would both claim is REFUSED rather than
+    awarded to whichever was inserted last — a coin-flip merge of two real
+    skills is worse than no merge at all.
+    """
+    derived: dict[str, str] = {}
+    ambiguous: set[str] = set()
+    for surface, canonical in lookup.items():
+        key = _derived_key(surface)
+        if not key:
+            continue
+        claimed = derived.get(key)
+        if claimed is None:
+            derived[key] = canonical
+        elif claimed != canonical:
+            ambiguous.add(key)
+    for key in ambiguous:
+        del derived[key]
+    return derived, frozenset(ambiguous)
+
+
+def _resolve(raw: str, lookup: dict[str, str], derived: dict[str, str]) -> str | None:
+    """Exact, then derived, then inflected-derived. None when nothing claims it."""
+    hit = lookup.get(raw)
+    if hit is not None:
+        return hit
+    key = _derived_key(raw)
+    if key:
+        hit = derived.get(key)
+        if hit is not None:
+            return hit
+        if len(key) >= INFLECTION_MIN_LENGTH:
+            inflected = key[:-1] if key.endswith("s") else key + "s"
+            hit = derived.get(inflected)
+            if hit is not None:
+                return hit
+    return None
+
+
 class SkillTaxonomy:
     """Domain object for skill normalization.
 
     88 canonical skills, 155 aliases, case-insensitive normalization, plus
-    derived handling of mechanical variants (spacing, separators, plural).
+    derived handling of mechanical variants (spacing, separators, plural), plus
+    synonym folds for names that are not skills (``SYNONYM_FOLDS``).
 
     An unknown skill is NOT dropped — it is returned lowercased and stripped.
     Losing a skill silently would make a job look like a better match than it
     is, so the taxonomy is additive-only by design.
 
-    Lookup happens in three passes, and the order is the safety property:
-    an **exact** table hit always wins, so no string that resolved before this
+    Lookup happens in passes, and the order is the safety property: an
+    **exact** table hit always wins, so no string that resolved before this
     class learned to derive anything can resolve differently now. Derivation
     only ever converts a previously-unresolved string into a canonical one.
+    Folds come after every skill pass, so they only ever convert a string the
+    VOCABULARY left unresolved — and they never enter ``_lookup``, which is
+    what a consumer reads to decide whether a token is a skill at all.
     """
 
-    def __init__(self, aliases: dict[str, set[str]]):
+    def __init__(self, aliases: dict[str, set[str]],
+                 folds: dict[str, set[str]] | None = None):
         self._aliases = aliases
         self._lookup: dict[str, str] = {}
         for canonical, alias_set in aliases.items():
             self._lookup[canonical] = canonical
             for alias in alias_set:
                 self._lookup[alias] = canonical
+        self._derived, ambiguous = _derived_index(self._lookup)
 
-        # Derived index. A key two different canonicals would both claim is
-        # REFUSED rather than awarded to whichever was inserted last — a
-        # coin-flip merge of two real skills is worse than no merge at all.
-        self._derived: dict[str, str] = {}
-        ambiguous: set[str] = set()
-        for surface, canonical in self._lookup.items():
-            key = _derived_key(surface)
-            if not key:
-                continue
-            claimed = self._derived.get(key)
-            if claimed is None:
-                self._derived[key] = canonical
-            elif claimed != canonical:
-                ambiguous.add(key)
-        for key in ambiguous:
-            del self._derived[key]
-        self._ambiguous = frozenset(ambiguous)
+        # The fold tier: same three passes, its own index, consulted only after
+        # the vocabulary has had every chance. No folds means no fold tier, so
+        # ``SkillTaxonomy(aliases)`` behaves exactly as it always did.
+        self._folds: dict[str, frozenset[str]] = {
+            token: frozenset(spellings) for token, spellings in (folds or {}).items()
+        }
+        self._fold_lookup: dict[str, str] = {}
+        for token, spellings in self._folds.items():
+            self._fold_lookup[token] = token
+            for spelling in spellings:
+                self._fold_lookup[spelling] = token
+        self._fold_derived, fold_ambiguous = _derived_index(self._fold_lookup)
+        # If the vocabulary itself claims a fold token -- an extension declared
+        # "backend development" a skill -- the whole family resolves to that
+        # skill, so it never splits between the skill and the fold.
+        self._fold_target: dict[str, str] = {
+            token: _resolve(token, self._lookup, self._derived) or token
+            for token in self._folds
+        }
+        self._ambiguous = ambiguous | fold_ambiguous
 
     def normalize(self, skill: str) -> str:
         """Normalize a skill string to its canonical form.
@@ -282,20 +378,14 @@ class SkillTaxonomy:
         """
         raw = _clean_surface(skill)
 
-        canonical = self._lookup.get(raw)
+        canonical = _resolve(raw, self._lookup, self._derived)
         if canonical is not None:
             return canonical
 
-        key = _derived_key(raw)
-        if key:
-            canonical = self._derived.get(key)
-            if canonical is not None:
-                return canonical
-            if len(key) >= INFLECTION_MIN_LENGTH:
-                inflected = key[:-1] if key.endswith("s") else key + "s"
-                canonical = self._derived.get(inflected)
-                if canonical is not None:
-                    return canonical
+        if self._fold_lookup:
+            token = _resolve(raw, self._fold_lookup, self._fold_derived)
+            if token is not None:
+                return self._fold_target[token]
 
         return raw
 
@@ -323,11 +413,15 @@ class SkillTaxonomy:
         The seam for platform-specific vocabulary: a board with its own skill
         names gets its own taxonomy without mutating the shared one. Aliases for
         an existing canonical skill are unioned, not replaced.
+
+        The folds carry over unchanged. uplers and instahyre score through an
+        extended taxonomy whenever the config teaches a skill, and dropping the
+        folds there would put the servers on two vocabularies.
         """
         merged = {k: set(v) for k, v in self._aliases.items()}
         for canonical, aliases in extra_aliases.items():
             merged.setdefault(canonical, set()).update(aliases)
-        return SkillTaxonomy(merged)
+        return SkillTaxonomy(merged, folds=self._folds)
 
     @property
     def canonical_count(self) -> int:
@@ -342,11 +436,12 @@ class SkillTaxonomy:
 
     @property
     def ambiguous_derived_keys(self) -> frozenset[str]:
-        """Derived forms two canonicals would both claim, and which therefore
-        resolve to neither. Empty on the shipped table; non-empty is a signal
-        that a newly added skill collides with an existing one."""
+        """Derived forms two canonicals (or two fold tokens) would both claim,
+        and which therefore resolve to neither. Empty on the shipped table;
+        non-empty is a signal that a newly added entry collides with an
+        existing one."""
         return self._ambiguous
 
 
 # Module-level singleton
-DEFAULT_TAXONOMY = SkillTaxonomy(SKILL_ALIASES)
+DEFAULT_TAXONOMY = SkillTaxonomy(SKILL_ALIASES, folds=SYNONYM_FOLDS)

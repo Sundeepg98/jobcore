@@ -59,6 +59,7 @@ fit.overall_score                        # 80
 | Piece | What it is |
 |---|---|
 | `SkillTaxonomy` / `SKILL_ALIASES` | **88 canonical skills, 155 aliases**, plus derived variants. `"react"` ← `reactjs`, `react.js`, `react js`, `react-js`. The crown jewel. |
+| `SYNONYM_FOLDS` | three discipline names (`backend`, `full stack`, `frontend`) whose spellings fold onto one token **without becoming skills**. See below. |
 | `SkillMatch` | job ∩ profile, and what's missing |
 | `ExperienceScore` | sqrt over-qualification penalty (floor 60), linear −20/yr under-qualification |
 | `BonusScore` | additive +5 location, +5 remote, +5 salary fit, +5 agent-eligible |
@@ -339,6 +340,77 @@ Misspellings cannot be derived — no rule turns `"kubernates"` into
 data, in `CORPUS_MISSPELLINGS`. Each one earns its place by having been seen on
 a live requisition.
 
+## A third table: names that are not skills (2026-11-26)
+
+A board's tag list also carries the name of a **discipline**, spelled several
+ways. On 80 scored Naukri rows, `"full stack"` was tagged on 28 and
+`"fullstack development"` on 16, `"backend"` on 10 and `"backend development"`
+on 3 — and each spelling was its own token. Fit scoring counts every tag, so a
+profile listing "Backend Development" missed every job tagged "Backend", and 14
+rows carrying both full-stack spellings counted one discipline twice.
+
+**The fix is not an alias, because they are not skills.** naukri's skill-gap
+report keeps only tokens this vocabulary recognises, so it never advises
+learning "full stack", and its suite pins that. Measured against that suite:
+the same families added to `SKILL_ALIASES` turn **3 of its 8** skill-gap tests
+red; as folds, **8 of 8** stay green. So `SYNONYM_FOLDS` is a second, lower
+tier:
+
+- consulted only after every skill pass, so it can never change an answer the
+  vocabulary had, and it never enters `_lookup`, `canonical_count`,
+  `alias_count` or the golden floor (still 88 skills, 155 aliases);
+- its spellings get the same derivation as skills, so only the semantic
+  variant is listed: `back-end`, `full-stack` and `front end` come free;
+- it survives `extended()`, and a skill always beats a fold: an extension that
+  declares `"backend development"` a skill gets every spelling of the family.
+
+| Folded | Spellings seen (Naukri 80 rows · Uplers 382 reqs · Instahyre 645 jobs) |
+|---|---|
+| `backend` | backend, Back-End, Backend Development, Backend developer |
+| `full stack` | Full Stack, FullStack, Fullstack Development, Full Stack Development |
+| `frontend` | frontend, Front end, front-end, Frontend Development |
+
+**Effect, offline, on the same 80 rows:** 21 rows change skill set, 20 score
+higher and 0 lower, and the jobs a 70 selector would auto-send rise from 6 to 8
+under the proposed profile (from 1 to 2 under the live one), both of them
+product companies.
+
+**The audit.** Every tag in five corpora (the 80 rows, 94 Naukri search rows,
+the Uplers requisitions, the Instahyre jobs, two profile lists) was normalised,
+and tokens sharing a separator-free key, or one differing only by a trailing
+"development" or "developer", were grouped. A planted pair proves the instrument
+can see. That gave **65 candidate groups; 3 are fixed above, and none of the
+other 62 is code.** Each is listed for a ruling:
+
+- **Proposed, a suffix of a known skill (2), an alias addition:**
+  react development → react; flutter developer → flutter.
+- **Proposed, unambiguous variants of a term outside the vocabulary (28).**
+  They could fold here with no vocabulary change, or become skills, which is
+  the `dynamo db` / `click house` question in `test_text_hygiene.py`:
+  ai/ml (ai ml, aiml), android tv, a/b testing, avfoundation, aws glue, big
+  data, cold calling, cosmos db, data structures, data warehouse, e-commerce,
+  event-driven architecture, exoplayer, fire tv, gen ai, google cast, hugging
+  face, llamaindex, mlflow, opensearch, opentelemetry, ruby on rails, voice ai;
+  and ios, android, servicenow, firmware, java full stack (each with its
+  development or developer form). Folding all 28 was measured: the auto-send
+  count at 70 stays 8.
+- **Proposed, compound tags over known skills (6), a semantic call:**
+  ci/cd pipeline(s) → ci/cd (measured: rows at 70 or above 25 → 27, auto-send
+  unchanged), agile/scrum → agile, azure (microsoft azure) → microsoft azure,
+  html/css, sql/nosql and react/next.js, which would each need a tag split.
+- **Not fixed, ambiguous (7):** application, software, ui, mobile, enterprise
+  and platform against their development or developer forms; data flows
+  against dataflow (a concept, or Google's product).
+- **Not fixed, plural only (19), a different kind:** algorithms, distributed
+  systems, integrations, webhooks and 15 more. The plural rule applies only to
+  terms the tables list.
+
+`tests/test_synonym_folds.py` holds the cases. At fff1438, 22 of its 44 tests
+are red; the other 22 are controls, invariants and three spellings that were
+already the token. After the fix, all 44 are green. Five mutants are each caught: the alias version, an over-merge,
+`extended()` dropping the folds, folds consulted first, and a declared skill
+ignored.
+
 ## Empty is never the same as broken
 
 An unparseable salary returns an **undisclosed** `Salary` — `min_lakhs is None`,
@@ -354,7 +426,7 @@ job 0 on the salary bonus.
 pytest
 ```
 
-554 tests, ~2s, no network.
+804 tests, about 20 s, no network.
 
 - **`test_parity_golden.py`** — `golden_scores.json` holds 179 inputs plus the
   full 88/150 alias table, captured by running Naukri's **pristine** scoring
@@ -367,6 +439,9 @@ pytest
 - **`test_normalisation.py`** — the mechanical variants above, every case taken
   from a live board rather than invented, sitting next to the false merges the
   derivation must not make.
+- **`test_synonym_folds.py`** — the discipline folds: one token per family,
+  never a skill token, surviving `extended()`, and the false merges they must
+  not make (`backend` is not `frontend`, `full stack` is not `stack`).
 - **`test_independence.py`** — AST-walks every source file and fails if a
   platform package or any third-party import appears; boots a clean subprocess
   interpreter and scores a job in it.
