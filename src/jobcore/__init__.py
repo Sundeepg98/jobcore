@@ -43,9 +43,10 @@ Three submodules follow that same rule and are imported the same way, from the
 server rather than from here, each for its own reason:
 
 * :mod:`jobcore.config` — reads a file (above).
-* :mod:`jobcore.buildinfo` — shells out to ``git`` to answer "what code is this
-  process actually running", which is a question about a deployment, not about
-  scoring. ``from jobcore import buildinfo``.
+* :mod:`jobcore.buildinfo` — reads git's files at import, and runs ``git`` on a
+  background thread, to answer "what code is this process actually running",
+  which is a question about a deployment, not about scoring.
+  ``from jobcore import buildinfo``.
 * :mod:`jobcore.paths` — renders a filesystem path into a form that carries no
   machine layout. Pure, but it is presentation, and the scoring path has no
   presentation. ``from jobcore import paths``.
