@@ -998,7 +998,29 @@ def _hashable_set(value) -> set:
     return out
 
 
+def _boolean_loosening(spec: KeySpec, old, new) -> bool:
+    """Read the OLD value the way the consumers read it -- never truthily.
+
+    An arming key (direction "down": True sends more) is armed ONLY by True; a
+    restricting key (direction "up": True holds back) is lifted ONLY by False.
+    Whatever else the file holds -- a "false" hand-typed before
+    :func:`_check_boolean` existed, a 1, a null -- is the SAFE state, because
+    that is how naukri's readers now take it. The truthy reading this replaces
+    let ``"false" -> True`` arm the agent without confirm_widen, and
+    ``_same(1, True)`` hid ``1 -> True`` as no change at all. ``None`` written
+    means "revert to the default", which is the safe state for every boolean
+    tier-B key.
+    """
+    if new is None:
+        new = spec.default
+    if spec.direction == "up":
+        return new is False and old is not False
+    return new is True and old is not True
+
+
 def _is_loosening(spec: KeySpec, old, new) -> bool:
+    if _is_boolean(spec):
+        return _boolean_loosening(spec, old, new)
     if old is None or _same(old, new):
         return False
     direction = spec.direction
@@ -1017,8 +1039,52 @@ def _is_loosening(spec: KeySpec, old, new) -> bool:
     return True  # any other change to a guarded key is treated as loosening
 
 
+def _is_boolean(spec: KeySpec) -> bool:
+    """A key whose shipped default is a bool -- the one type witness a spec carries.
+
+    Every boolean key in the schema has one, and a spec whose choices are all
+    bools has a bool default too (tests/test_config_boolean_writes.py pins both).
+    """
+    return isinstance(spec.default, bool)
+
+
+_JSON_KINDS = ((bool, "a boolean"), (int, "an integer"), (float, "a number"),
+               (str, "a string"), ((list, tuple), "a list"), (dict, "an object"))
+
+
+def _kind(value) -> str:
+    for types, name in _JSON_KINDS:
+        if isinstance(value, types):
+            return name
+    return type(value).__name__
+
+
+def _check_boolean(spec: KeySpec, key: str, new) -> Optional[str]:
+    """A boolean key takes ``type(value) is bool``, or None to revert. Nothing else.
+
+    Until 2026-11-28 nothing checked: ``servers.naukri.agent.enabled`` took 0
+    and 1 through its ``choices`` (``1 == True``), and the other boolean keys,
+    which carry no choices, took any type at all. Measured on the pre-fix
+    module: 73 of 75 non-bool writes (0, 1, 1.0, "true", "false" to each of
+    the 15 boolean keys, confirmed) LANDED in the file.
+    """
+    if new is None or not _is_boolean(spec) or type(new) is bool:
+        return None
+    return (
+        f"{key} must be true or false, not {_kind(new)} {new!r}. A JSON true or "
+        f"false is the only value its readers can take at its word."
+    )
+
+
+def _matches_choice(new, choice) -> bool:
+    """``==``, except that a bool and a number are never the same choice."""
+    if isinstance(new, bool) or isinstance(choice, bool):
+        return type(new) is type(choice) and new == choice
+    return new == choice
+
+
 def _check_choices(spec: KeySpec, key: str, new) -> Optional[str]:
-    if spec.choices and new not in spec.choices:
+    if spec.choices and not any(_matches_choice(new, c) for c in spec.choices):
         return f"{key}={new!r} is not one of {list(spec.choices)}"
     if spec.tier != TIER_B:
         if isinstance(new, (int, float)) and not isinstance(new, bool):
@@ -1116,7 +1182,7 @@ def apply_patch(
                 f"the config file at any tier. {spec.doc}"
             )
             continue
-        problem = _check_choices(spec, key, new)
+        problem = _check_boolean(spec, key, new) or _check_choices(spec, key, new)
         if problem:
             refusals.append(problem)
             continue
